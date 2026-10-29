@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "本地 Markdown 知识库的召回/导入/评测工具（零依赖 Node 脚本）",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

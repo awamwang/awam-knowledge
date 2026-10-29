@@ -4,7 +4,7 @@
  * 运维自检：确认当前环境下的密钥来源可用，且签发端（companion）与校验端（secret-provider）取到同一把密钥。
  * 不打印密钥本身，也不打印会话；只输出来源、长度与结论。
  *
- *   BW_SESSION=$(bw unlock --raw) AWAM_SECRET_CMD='bw get password awam-mcp' node code/secret-broker-check.js
+ *   BW_SESSION=$(bw unlock --raw) AWAM_SECRET_CMD='bw get password <vault-item>' node code/secret-broker-check.js
  *   AWAM_SECRET=...           node code/secret-broker-check.js
  *   node code/secret-broker-check.js          # 回退到 <AWAM_STATE_DIR>/secret.key
  */

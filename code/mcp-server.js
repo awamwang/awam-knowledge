@@ -13,7 +13,7 @@
  *   快照 state.json + 追加 state.jsonl；同目录单写者锁，第二个进程只读不写。
  *
  * 密钥来源（优先级）：AWAM_SECRET > AWAM_SECRET_CMD > 状态目录下 secret.key（首次生成，0600）。
- * 例：AWAM_SECRET_CMD="bw get password awam-mcp"（Bitwarden CLI）。
+ * 例：AWAM_SECRET_CMD="bw get password <vault-item>"（Bitwarden CLI）。
  */
 'use strict';
 const fs = require('fs');

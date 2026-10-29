@@ -1,6 +1,6 @@
 # awam-knowledge
 
-本地 Markdown / Logseq 知识库的**召回、导入、评测工具**（零依赖 Node 脚本）。本仓保存可运行代码、设计定稿与公开结论；**调研过程与真实评测集在仓外**。
+本地 Markdown / Logseq 知识库的**召回、导入、评测工具**（零依赖 Node 脚本）。本仓保存可运行代码、设计定稿与公开结论；**调研过程与真实评测集在仓外**。许可：[MIT](LICENSE)。
 
 - 遗留问题与未完成项：[`docs/OPEN-ISSUES.md`](docs/OPEN-ISSUES.md)
 - 调研存放约定：[`docs/RESEARCH.md`](docs/RESEARCH.md)（私有副本：同级 `awam-knowledge.private/`）
@@ -80,7 +80,7 @@ node code/eval-recall.js --queries-json ../awam-knowledge.private/queries-t18.js
 
 ```bash
 export BW_SESSION=$(bw unlock --raw)          # 解锁后会话留在本 shell
-export AWAM_SECRET_CMD='bw get password awam-mcp'
+export AWAM_SECRET_CMD='bw get password <vault-item>'
 node code/secret-broker-check.js              # 结论：source / length / 两侧同源 / 签验往返
 ```
 

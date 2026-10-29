@@ -8,7 +8,7 @@
 - 已删除脚手架与一次性探针（`AGENT.md`、`SOUL.md`、`IDENTITY.md`、`USER.md`、`docs/SOP.md`、`docs/features|decisions|discussions`、`diag*.js`、`recon.js`、`wiz-check.js`、`probe-*.js`、`host-probe-*.js`、`embed-stub-server.js`、`worker.js`、`concurrency-test.js` 等）。
 - 运行产物（`code/data/`、私有 t21 manifest、两份语料扩展词典）已移出仓库；调研报告与 evidence 在仓外 `awam-knowledge.private/research/`，约定见 [RESEARCH.md](RESEARCH.md)。
 - 自检（`npm run selftest`）9 个脚本共 220 项，全部通过：eval 19、infra 38、secret 18、mcp 60、import 31、scan-links 16、prepare-test-corpus 9、query-set 6、spike 23。
-- 旧 `.git`、agent / team / memory 运行时目录已移到仓库外的 `awam-knowledge.backup-20261029/`（与仓库同级）。
+- 旧 `.git`、agent / team / memory 运行时目录已移出仓库（仅本机离线备份，不进 Git）。
 
 ## 2. 工程缺口
 
@@ -25,7 +25,7 @@
 | 配置只读环境变量 | 新增只读 `settings.yaml` 回退：`KM_DATA_ROOT`/`KM_SOURCE_ID` 优先，缺省读 `~/.knowledge-manager-skills/settings.yaml`（`KM_SETTINGS` 可改路径），支持 `~` 与 `%USERPROFILE%` | [code/index-root.js:54](../code/index-root.js#L54)、[code/index-root.js:76](../code/index-root.js#L76) |
 | 导入器覆盖不足 | 新增密钥模式扫描（7 类规则，**不记录值**）、零字节附件、同内容附件去重、编码告警、断点复用（`--resume`）、逐文件错误隔离、manifest v2（逐文件 counters/refs/unresolved） | [code/import-md-dir.js:151](../code/import-md-dir.js#L151) |
 | 辅助脚本未收口 | `scan-links.js` / `prepare-test-corpus.js` / `query-set-check.js` 全部提供 `--selftest` 并纳入 `npm run selftest`；`query-set-check` 改读 `code/queries-t18.json`，不再硬编码 | [package.json](../package.json)、各脚本 `--selftest` |
-| 密钥 broker 端到端（2026-10-29 第三批） | 密钥来源收敛到 `secret-provider.js`（签发端与校验端同源，统一 ≥16 字符）；`AWAM_SECRET_CMD='bw get password awam-mcp'` 经真实 Bitwarden（CLI 2025.12.0）跑通：`secret-broker-check` 返回 `source=cmd / length=64 / same_secret_as_signer=true / roundtrip=true`；MCP server 端到端 `propose_write → commit_write` 提交成功并落盘，即 server 与 companion 各自从 bw 取到同一把密钥。未解锁时命令立即退出（stdin 置 ignore）并给出解锁指引，不会挂到超时 | [code/secret-provider.js](../code/secret-provider.js)、[code/secret-broker-check.js](../code/secret-broker-check.js)、`npm run selftest` secret 18 项 |
+| 密钥 broker 端到端（2026-10-29 第三批） | 密钥来源收敛到 `secret-provider.js`（签发端与校验端同源，统一 ≥16 字符）；`AWAM_SECRET_CMD='bw get password <vault-item>'` 经真实 Bitwarden（CLI 2025.12.0）跑通：`secret-broker-check` 返回 `source=cmd / length=64 / same_secret_as_signer=true / roundtrip=true`；MCP server 端到端 `propose_write → commit_write` 提交成功并落盘，即 server 与 companion 各自从 bw 取到同一把密钥。未解锁时命令立即退出（stdin 置 ignore）并给出解锁指引，不会挂到超时 | [code/secret-provider.js](../code/secret-provider.js)、[code/secret-broker-check.js](../code/secret-broker-check.js)、`npm run selftest` secret 18 项 |
 | 导入平台差异与双链语义（2026-10-29 第六批） | 路径比对键统一 NFC（macOS 的 NFD 文件名不会再与链接目标错配，manifest 一律存 NFC）；win32 下大小写不敏感比对：`[[Sample]]` 命中 `pages/Sample.md`、`IMG/PHOTO.PNG` 命中 `img/photo.png`，附件不再被误判为孤儿；新增 `links.wiki_pages_total/resolved` 与 `links.block_refs{total,resolved,unresolved,id_defs}`：`((uuid))` 按本批 `id::` 对账，未命中记 `block_ref_missing`；win32 统计 `integrity.long_paths`（>240 字符） | [code/import-md-dir.js:77](../code/import-md-dir.js#L77)（`matchKey`）、[code/import-md-dir.js:194](../code/import-md-dir.js#L194)（块引用待解析）、[code/import-md-dir.js:399](../code/import-md-dir.js#L399)（summary）、[code/import-md-dir.js](../code/import-md-dir.js) selftest 第三批 8 项 |
 | 导入无法断点续跑（2026-10-29 第五批） | 运行中每 ≤1s / 50 个已完成文件原子写一次检查点 `<state>/imports/<job_id>.partial.json`（只含已完成 Markdown 的 path/size/mtime/counters 等条目）；`resume_job` 在 interrupted / cancelled / failed 后起一个新 job（`resumed_from` 指向原 job），按 size+mtime 复用未变文件；新 job 完成时删自身检查点并清掉被继承的那份。phase 跃迁也落盘 | [code/import-md-dir.js:155](../code/import-md-dir.js#L155)（`checkpoint` 回调）、[code/mcp-server.js:286](../code/mcp-server.js#L286)（`runImport`）、[code/mcp-server.js:426](../code/mcp-server.js#L426)（`toolResumeJob`）、`mcp-selftest` 取消后续跑 6 项 + 崩溃后续跑 3 项 |
 | job 进度数字只在跃迁时落盘（2026-10-29 第七批） | 写检查点的同时把 `done`/`total` 记进状态库，别的进程在 job 运行期间就能读到进度，最多落后一个检查点间隔（≤1s 或 50 个文件）；续跑仍是显式 `resume_job`，启动时**不自动**恢复 | [code/mcp-server.js:299](../code/mcp-server.js#L299)（`checkpoint`）、[code/mcp-selftest.js:120](../code/mcp-selftest.js#L120)（`journalJobProgress`）、mcp 新增 2 项断言 |
@@ -53,25 +53,20 @@
 
 ## 5. 隐私与发布
 
-- 仓库内 `code/queries-t18.json` 仅为脱敏示例；真实 query 集与 `research/evidence/*` 在 `awam-knowledge.private/`，**不进 Git、不对外分发**。约定见 [RESEARCH.md](RESEARCH.md)。
-- 已清理出仓：本机绝对路径、内网 IP、Windows 用户目录、团队工作区路径、两份语料扩展词典（含个人账号 / 站点标识）、调研过程全文。
-- 仍存在、需人工确认：
-  - 仓外 `research/10-host-support-report.md` 保留 `.office-claw` 作为宿主数据目录名（描述性，不含路径）。
-  - 备份目录 `awam-knowledge.backup-20261029/` 里有**未脱敏的旧 git 历史与 agent 镜像**。用户 2026-10-29 决定**保留不动**：留在仓库外当离线备份，不提交、不推送、不删除；如需对外分发或释放空间，另作决定。
-- 凭据：`EMBED_API_KEY` 仅运行时注入；历史对话中曾明文出现，**建议轮换**。
-- 凭据：本机为验证 broker 把 `BW_SESSION` 写进了**用户级环境变量**（注册表 `HKCU\Environment`，明文、跨 shell 长期有效），`AWAM_SECRET_CMD='bw get password awam-mcp'` 依赖它。撤销：`[Environment]::SetEnvironmentVariable('BW_SESSION',$null,'User')`；长期更稳妥的做法是每次会话解锁后只在本进程内传递。
-- MCP 状态目录（默认 `.spike-runtime/`，已 ignore）存 `state.json{,l}`、`audit.jsonl`、`proposals.json`、`imports/`、`index-cache.json` 与 `secret.key`（POSIX 0600；Windows 上 chmod 不生效，仅依赖状态目录 ACL）；撤销记录为支持窗口内回滚会保存**上一版文件内容快照**（`UNDO_WINDOW_MS` 内，默认 60s 后不再可用但仍留在日志中），清理策略待定；已用 token 只存 HMAC 串本身，不含密钥。`secret.key` 不得提交，发版前用 `AWAM_SECRET` / `AWAM_SECRET_CMD` 替代。审计记录含写入目标路径与 hash，不含文件内容。
+- 仓库内 `code/queries-t18.json` 仅为脱敏示例；真实 query 集与调研 evidence 放在仓外私有目录，**不进 Git**。约定见 [RESEARCH.md](RESEARCH.md)。
+- 已清理出仓：本机绝对路径、内网 IP、用户目录、语料扩展词典、调研过程全文、第三方 embedding 主机名、保险库条目名。
+- 凭据：`EMBED_API_KEY` / `AWAM_SECRET*` / `BW_SESSION` **仅运行时注入**，勿写入用户级持久环境；会话解锁后只在当前进程传递。若 key 曾在聊天或日志中出现过，应轮换。
+- MCP 状态目录（默认 `.spike-runtime/`，已 ignore）存 job / token / 审计 / `secret.key` 等；`secret.key` 不得提交。审计只含路径与 hash，不含文件内容。
 
 ## 6. Git 与远端
 
-- 2026-10-29 再次清空历史并 `git init -b main` 做干净首提：`research/` 与真实 query 集不再入库；`origin` 仍指向 `https://github.com/awamwang/awam-knowledge.git`，**未推送**。
-- 用户决定**暂不推送**：本地与 `origin/main` 历史分叉。将来对齐需 force-push，**需单独批准**。
+- 本地为干净历史（无 `research/`、无真实评测集）。公开前须用干净 `main` 覆盖远端旧历史（force-push，需单独批准），确认远端无旧 `research/` 后再改 Public。
 
 ## 7. 变更记录
 
 - 2026-10-29（UI 验证补齐）：`ui-check` 增加 200% 缩放视口（640×450 布局视口 + 2× DPR）与纯键盘流程（真 Tab/Enter 事件走完确认写入 → 撤销），当前 0 问题。过程中确认 `rawKeyDown` 不激活按钮，Enter 必须带 `text` 走 `keyDown`，否则键盘断言会假失败。
 - 2026-10-29（第七批）：job 进度数字随检查点落盘（此前只有 phase 跃迁与结束才写状态日志，另一个进程在整段 analyzing 期间都读到旧值）。mcp 自检 58→60：运行中直接读状态日志断言 ≥49、崩溃重启后断言 `done>0`；把落盘那行关掉复跑，两条都失败，确认断言有效。自检 220 项。
-- 2026-10-29（决策落地，非代码变更）：召回评测**收口**（BM25 标题×4 为主、向量仅跨语言兜底，不扩集不重跑）；备份目录 `awam-knowledge.backup-20261029/` **保留不动**（仓库外离线备份）；远端**暂不推送**（分叉保留，force-push 仍需单独批准）。代码未改，自检仍 218 项。
+- 2026-10-29（决策落地，非代码变更）：召回评测**收口**（BM25 标题×4 为主、向量仅跨语言兜底，不扩集不重跑）；调研与备份留仓外；公开前须先用干净历史对齐远端。代码未改，自检仍 218 项。
 - 2026-10-29（第六批）：导入器做平台归一（NFC + win32 大小写比对）并解析 Logseq 块引用（`((uuid))` 对 `id::`）；附件误判孤儿、双链页面假未命中这两类在 Windows 上的缺陷一并修掉。自检 218 项（import 23→31）。
 - 2026-10-29（第五批）：导入 job 支持断点续跑 —— 运行中限频写检查点，取消/崩溃后 `resume_job` 起新 job 复用未变文件；phase 跃迁落盘。自检 210 项（mcp 46→58）。
 - 2026-10-29（第四批）：新增独立追加式审计 `audit.jsonl` 与只读工具 `get_audit`，记录提案/提交/拒绝原因/撤销、客户端名与版本；状态日志压实不再可能带走审计。自检扩到 198 项（infra 30→38，mcp 38→46）。
