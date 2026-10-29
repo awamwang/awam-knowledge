@@ -1,0 +1,71 @@
+# docs/design · 《AI 接入的知识系统》设计交付物索引
+
+> 来源：团队共享工作空间 `...\team-workspace\design\`（本轮 product-design 团队产出）
+> 说明：**主方案为最终口径；分册为输入快照**——分册为各角色分头设计的阶段性产物，若与主方案不一致，一律以主方案《AI知识系统-设计方案.md》为准。
+> **路径说明（2026-10-29）**：历史同步记录里的 `code/out-*` 等是当时落点；评测产物与调研报告现只在仓外 `awam-knowledge.private/research/`（不进 Git）。现仓结构见根 `README.md`，调研约定见 `docs/RESEARCH.md`，未完成项见 `docs/OPEN-ISSUES.md`。
+> 落盘方式：逐字复制自源目录，未做任何改写（仅新增本索引）。**未执行任何 Git 提交。**
+> **同步记录**：`T34 叠加验证（D1 标题×4 × B 表面路由）`（2026-10-18）——把 T33 两个"已见效单项"**叠加验证**（**设置先于看结果写定，见 `code/t34-preregistration.md`，跑后不改**）：**D1+B**（BM25 分支 `--title-weight 4` + 路由规则同 T33 B：纯 ASCII→向量、含汉字→BM25）、**D1+A(1:1)/A(3:1)**（加权 RRF 参照）；本地端点 `$EMBED_ENDPOINT`（**无 key、零外发**），复用 T31 私有缓存（`fetched=0 / cache_hits=761`，标题权重不改向量）。**基准双参照**：旧 M1（标×2, @1 0.6154/@5 0.8462/MRR 0.7003）与**新词法基准 D1-BM25（标×4, @1 0.6923/@5 0.8462/@10 0.8846/MRR 0.7474）**。**结论：对"同标题权重的公平词法基准 D1-BM25"——D1+B 仅 jina 在 @5 0.8846>0.8462、@10 0.9615>0.8846、MRR 0.7615>0.7474 超过、@1/@3 持平；bge 逐条与 D1-BM25 完全一致（打平）→ 不满足"两模型都超过" → "未强于"。对旧 M1（×2）虽两模型都超，但增益主体来自标题×4（词法侧），不得记作 hybrid 之效。** 叠加的净增益仍只落在**跨语言 2 条 query 的深度名次**（Q13→5、Q15→6）；**G1-jina 为迄今绝对最好成绩**（@1 0.6923 / @10 0.9615 / MRR 0.7615）。D1+A(1:1)/A(3:1) 参照仍不占优（@1 仅 0.4615 / 0.5385）。`09-recall-baseline-report.md` 新增 **§6.8** 并更新 §0/§2/§7/§8/页脚；新增 `code/t34-preregistration.md`、`code/run-t34.sh` 与 6 组 `code/out-t34-*.json` / `.md`（未改 harness 逻辑，`--selftest` 仍 19/19）。**单次运行、无参数择优、全本地无外发无 key**；大体积向量缓存存私有工作区、**不进共享空间**。逐字同步至项目镜像；**SHA256 全量对比（排除 `code\data`）见下文同步结果；未执行任何 Git 提交。**
+> **同步记录**：`T33 融合策略对照`（2026-10-18）——在 T31 本地 embedding 之上做**一轮预注册的召回改进对照**（**设置先于看结果写定，见 `code/t33-preregistration.md`，跑后不改**）：**A 加权 RRF**（`w_lex:w_vec = 3:1/2:1/1:1`）、**B 表面路由**（纯 ASCII query→向量、含汉字→BM25，只读字面）、**C 召回并集**（BM25 top-50 ∪ 向量 top-50，按 `min(rank)` 排序）、**D 标题×4**（词法侧低成本项）；本地端点 `$EMBED_ENDPOINT`（**无 key、零外发**），复用 T31 私有缓存（`fetched=0 / cache_hits=761`，非桩非缓存）。**结论：A 加权 RRF（至 3:1）与 C 召回并集均未强于 BM25-only（@1/@5 仍落后）；B 表面路由（jina）在 @5 0.8462→0.8846、@10 0.8462→0.9231、MRR 0.7003→0.7144 上超过 BM25、@1/@3 持平，但增益全部来自 4 条跨语言 query 选路、且 bge 下与 M1 完全打平 → 不构成“强于”；D1 标题×4 提升的是 BM25 基线本身（@1 0.6154→0.6923、MRR→0.7474）。** → **无配置使 hybrid 在“@1 且两模型一致”下胜出，“召回强于关键字”仍未获证明。** `09-recall-baseline-report.md` 新增 **§6.7** 并更新 §0/§2/§7/§8/页脚，`--selftest` 由 14 项扩至 **19 项**（全通过）；新增 `code/t33-preregistration.md`、`code/run-t33.sh`、`code/summarize-t33.js`、`code/out-t33-summary.md` 与 13 组 `code/out-t33-*.json` / `.md`；`code/eval-recall.js` 增加 `--lex-weight`/`--vec-weight`/`--route`/`--union`/`--title-weight`。768 维向量缓存存于私有工作区、**不进共享空间**；**单次运行、无参数择优、全本地无外发无 key**。逐字同步至项目镜像；**SHA256 全量对比（排除 `code\data`）SRC_COUNT=90 / MISMATCH=0 / MISSING=0 / ZERO_BYTE=0；未执行任何 Git 提交。**
+> **同步记录**：`T31 本地 embedding 真跑`（2026-10-18）——按用户改用**本地 embedding**（`$EMBED_ENDPOINT`，OpenAI 兼容 `/v1/embeddings`，**本地无需 key**）重跑 M2 hybrid，口径与 T27 **严格一致**（Logseq-only 428 md / 751 chunk / 26 query / top-N=50 / rrf_k=60 / 文件级主口径）。两版均 768 维、`fetched=761 / cache_hits=0`（非桩非缓存）：**`BAAI/bge-base-zh-v1.5`** 文件级 recall@1 **0.3846** / @3 0.5769 / @5 **0.6154** / @10 0.6923 / MRR **0.5042**；**`jina-embeddings-v2-base-zh`** recall@1 **0.4231** / @3 0.6154 / @5 **0.6923** / @10 0.7692 / MRR **0.5579**。→ **本地两模型均未强于 BM25-only**（M1：@1 0.6154 / @5 0.8462 / MRR 0.7003），**亦整体低于 T27 线上 3072 维**（@1 0.5000 / @5 0.7692 / MRR 0.6324）；**跨语言盲区救回依赖模型**——bge 0/3、jina 2/3（Q13→5、Q15→8）。`09-recall-baseline-report.md` 新增 **§6.6** 本地一节并更新 §0/§2/§4/§7/§8；新增探针 `code/probe-embed.js` 与证据 `code/out-hybrid-local-bge-base-zh.json` / `.md`、`code/out-hybrid-local-jina.json` / `.md`。768 维向量缓存保存于私有工作区、**不进共享空间**；**单次运行、无参数择优、全本地无外发无 key**。逐字同步至项目镜像；**SHA256 全量对比（排除 `code\data`）SRC_COUNT=60 / MISMATCH=0 / ZERO_BYTE=0；未执行任何 Git 提交。**
+> **同步记录**：`T30 U1/§8.1 指针对齐`（2026-10-18）——消除"H7 已通过 vs U1/§8.1 仍 `[Q]`"的口径张力：`10-host-support-report.md` 的 **§5 U1 行（行115）** 与 **§8.1 `progress` 是否渲染行（行210）** 各**补一句指针**「见 H7：已由用户人工判定通过（依据=人工观察，非日志实证）」；**U1 保留 `[Q]` 标记**（层次一致，仅指向 H7）、**不改结论性质、不动其他行**；文首任务行加 T30。**镜像口径＝排除 `code\data\` 运行产物**（含历史副本一并移出，源端 `code\data` 仍在）。逐字同步至项目镜像；**SHA256 全量对比（排除 `code\data`）MISMATCH=0、`ZERO_BYTE=0`、`DST_SPIKE_DATA_EXISTS=False`；未执行任何 Git 提交。**
+> **同步记录**：`T29 Cursor progress 人工判定回填`（2026-10-18）——把 `10-host-support-report.md` 的 **H7（Cursor 是否渲染 `notifications/progress`）由 `[Q]` 改为「已通过（用户人工判定；UI 渲染不稳定，日志无法自证）」**：结论依据＝**用户在实际 Cursor 中的人工观察**（**非**日志行），此前多次"界面未渲染"判为 **UI 渲染不稳定、无法从 `host-probe-log.jsonl` 自证**；**其余行（H4–H6、H8、U1–U6）一行未动**；文首任务行加 T29、页脚版本号登记 T29。逐字同步至项目镜像；**SHA256 全量对比一致（SRC/M1/M2 三处 `44E0AEBC…E0D8` / 24988B）、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`v1.4`（T28，2026-10-17）——主方案**就地升版 v1.3→v1.4** + 文首修订记录新增一行，**回填 T27 的 M2（向量 hybrid）实测结论**：**M2 由 `[Q]` 转 `[实测]`**（限"单次运行 / 未做参数择优 / 26 条样本"，不宜过度解读），**但未强于 BM25-only**（文件级主口径 recall@1 0.5000 / @3 0.7692 / @5 0.7692 / @10 0.8077、MRR 0.6324 全面落后于基线 0.6154 / 0.7692 / 0.8462 / 0.8462 / 0.7003）→ **全文严禁写成"已强于关键字"**；**但向量确救回 BM25 跨语言盲区**（Q13/Q15/Q16 由全未命中 → top-17/3/12，top-50 未命中 3→0、跨语言 recall@5 0.2500→0.5000），**代价是等权 RRF(k=60) 稀释词法首位命中**（精确术语/多跳首位下滑，Q05/Q06/Q20/Q22/Q26 名次下降）；后续可试**加权 RRF / 按 query 类型路由**（均未验证）。回填位置：主方案 §0 术语表、§1.4、§4.2（效果/结构性发现/进展）、§9.1 R2、§9.2 Q9、§9.3 后续 spike、附录 A.1/A.7、附录 C；`02`/`03`/`05` 仅文首新增"**变更登记**"一行、**正文未改写**（标"输入快照，最终口径以主方案为准"）。逐字同步至项目镜像；**SHA256 全量对比一致（SRC 63 / DST 64 含本 README）、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`T27 M2 hybrid 真跑`（2026-10-17）——改用**用户已批准的线上 embedding**（`api.gptgod.online` / `text-embedding-3-large` / 3072 维）真跑 M2：`code/eval-recall.js` 增 `--embed-api-key-env`（默认 `EMBED_API_KEY`，**key 仅经 env 运行时注入、绝不落盘**）/`--embed-concurrency`（默认 6）/`--embed-retries`（默认 3），向量请求附 `Authorization: Bearer`。真跑（Logseq-only 428 md / 751 chunk / 26 query / top-N=50，`fetched=761 / cache_hits=0`）：**文件级 hybrid recall@1 0.5000 / @5 0.7692 / MRR 0.6324，全面低于 BM25-only 的 0.6154 / 0.8462 / 0.7003 → “召回强于关键字”仍未获证明**；但**向量救回了 BM25 的跨语言盲区**（3 条未命中 → top-20），代价是**等权 RRF 稀释词法首位命中**。**未做参数择优、单次运行**。`09-recall-baseline-report.md` **§6 整体重写**（6.1 服务 / 6.2 主表 / 6.3 逐条差异 / 6.4 结论 / 6.5 代码变更）并更新 §0/§2/§4/§5/§7/§8；新增证据 `code/out-hybrid-t27.json` / `.md`。3072 维向量缓存保存于私有工作区、**不进共享空间**。逐字同步至项目镜像；**SHA256 全量对比一致、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`T26 M2 接口就位`（2026-10-17）——把 `code/eval-recall.js` 的 **M2（BM25 + 向量 RRF）分支真正实现**（新增 `--embed-endpoint`/`--embed-model`/`--embed-cache`/`--embed-batch`/`--embed-timeout`/`--rrf-k`；向量客户端用 Node 内置 `fetch`+超时；按 `sha256(model‖text)` 缓存、去重后只请求缺失项；BM25 排序与余弦向量排序经 **RRF** 融合后复用文件级(主)/chunk 级(辅)口径与 recall@1/3/5/10+MRR；**服务不可达则 `status=unavailable` + 退出码 2、绝不产数字**），并新增本地桩服务 `code/embed-stub-server.js` 做**管路自检**（桩结果置 `not_a_baseline: true`、数字不可引用）。**复检结论**：用户提供的 embedding 服务 `$EMBED_ENDPOINT` **实测不可达**（`127.0.0.1`/LAN IP 的 TCP 均不通、POST 返回 `fetch failed`）→ **M2 仍为 `[Q]`，报告仍不含任何 hybrid 数字**；`09-recall-baseline-report.md` 新增 **§6**（现状/复检/代码变更/管路自检 14/14/结论）并更新 §0/§2/§7/§8。**主方案 v1.3 未改动**。逐字同步至项目镜像；**SHA256 全量对比一致、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`T25 缺陷修复回填`（2026-10-17）——回填**宿主对 `unknown progressToken` 的严格性**实测（`10-host-support-report.md` 新增 **§8.5**、结论表新增 **H8**、U 表新增 **U6**）：修复前探测 server 未原样回传 token（自造 `probe-N`）→ 严格宿主报 `Received a progress notification for an unknown token`、`connected=false (error)`；规范结论＝**服务端只能就请求方 `_meta.progressToken` 发进度、无 token 不发、有则原样回传**；`code/host-probe-server.js` 已修复（**SHA256 `F91029BB…0DAD892` / 7297B**）。此属**探测器缺陷修复，不改变产品设计结论**。逐字同步至项目镜像；**SHA256 全量对比一致、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`T24 证据回填`（2026-10-17）——把**真实宿主实测证据**回填到 `10-host-support-report.md`（新增 **§8**：Cursor `cursor-vscode` v1.0.0 声明 `elicitation(form)`+`roots`+MCP-UI 扩展、**elicitation = 支持**（返回 `accept`）；harness `mcp` v0.1.0 `capabilities:{}`、**elicitation = 不支持**（`-32600 Elicitation not supported`）、**工具调用不带 `progressToken`**）。结论分层：**H5 由 `[Q]` → `[实测]`**（Cursor 支持 / harness 不支持）、**H4 协议层 `[实测]`**（harness 未参与进度协议；**Cursor 参与但 UI 渲染仍 `[Q]` 待复测**，误判根因＝探测器未回传 token，已修）。§3/§3.2/§4.4/§5/§7.6 相应更新；**主方案 v1.3 未改动**（仅本报告与索引）。逐字同步至项目镜像；**SHA256 全量对比一致、无零字节文件；未执行任何 Git 提交。**
+> **同步记录**：`v1.3`（T23，2026-10-17）——主方案回填本轮三项 spike 结论（① **召回基线（T20）**：BM25-only 基线已建、**"强于关键字"仍未实现**，M3 未胜、M2 未验证，跨语言为 BM25 硬盲区；② **导入（T21）**：**为知跳过**，改用通用"带附件 Markdown 目录"能力，**丢失清单升一等产物**（入 job `errors[]`）、**解析器自检列强制机制**、附件"只索引按需取用"，保真度加"解析器自检"前置；③ **宿主（T22）**：连接器宿主级 SQLite 管理 + 支持 stdio + 宿主内置审批记录子系统、挂载须宿主侧动作，渲染/审批仍 `[Q]`）。**全量同步**：新增 `08-data-connectivity-report.md`/`09-query-set-draft.md`/`09-recall-baseline-report.md`/`11-import-with-attachments-report.md` 与 `code/` 全部脚本/证据；更新 `AI知识系统-设计方案.md`(v1.3) 及 `02`/`03`/`05`（后两者仅文首新增"变更登记"，正文未改写）。**SHA256 全量对比一致、无零字节文件。未执行任何 Git 提交。**
+> **同步记录**：`v1.2`（T16，2026-10-17）——主方案回填用户对三项 `[Q]` 的澄清（① 反填端到端主用途锁定「供 AI agents 使用」、人手工反填暂不做但保留可能性；② 混合召回基线下一步 = 先连通 Logseq 与为知(Markdown)数据 → 再由 AI 辅助共建评测语料 query set；③ 真实客户端支持面目标锁定 Cursor 与 deepseek harness），并已逐字同步 `AI知识系统-设计方案.md`(v1.2) / `03-flows-and-ia.md` / `04-visual-and-security-ux.md`（后两者仅文首新增"变更登记"，正文未改写）。**未执行任何 Git 提交。**
+> **同步记录**：`v1.1`（T14/T15，2026-10-17）——主方案回填用户三项决策（① UI 呈现验证降级、② 密码管理器锁定 Bitwarden、③ 为知笔记改道通用 Markdown 通路），并已逐字同步 `AI知识系统-设计方案.md`(v1.1) / `03-flows-and-ia.md` / `04-visual-and-security-ux.md`（后两者仅文首新增"变更登记"，正文未改写）。
+
+## 主交付
+
+| 文件 | 说明 |
+|------|------|
+| `AI知识系统-设计方案.md` | **主方案（最终口径，v1.4）**。含术语表、目标与范围、总体架构、导入层（**为知跳过 → 通用"带附件 Markdown 目录"**）、存储与召回层（**BM25-only 基线已建；M2 向量 hybrid 已 `[实测]` 但未优于关键字、仅救回跨语言盲区**）、安全·密钥层（Bitwarden）、反填机制（主用途=供 AI agents 运行时取用）、AI 会话交互与写入边界（E-01~E-18）、MVP 与里程碑、落地形态与实现机制（§10，目标客户端 Cursor / deepseek harness）、风险与未决（R1–R12、Q1–Q17），及成功指标/选型依据/去重自检三个附录。 |
+
+## 分册（输入快照）
+
+| 文件 | 说明 |
+|------|------|
+| `00-precheck-notes.md` | 前置预研：三来源导入、混合检索、密钥反填的可行性与未验证项。 |
+| `01-users-and-scenarios.md` | 用户与场景：用户分群、JTBD、痛点、场景与待验证清单。 |
+| `02-scope-and-capability-architecture.md` | 范围与能力架构：六层能力域 L1–L6、MVP 组件、非目标、成功指标。 |
+| `03-flows-and-ia.md` | 流程与信息架构：F1–F4 流程、V0–V6 视图、写入确认闸专项、边界 E-01~E-17（含 T7 两阶段协议修订）。 |
+| `04-visual-and-security-ux.md` | 视觉与安全 UX：色彩/字体/间距 token、三层视觉语言、密钥四态模型、组件状态语言、WCAG（含 T8 修订）。 |
+| `05-validation.md` | 验证：四项核验结论、两阶段协议缺口、命名裁决、原型模拟范围、风险表。 |
+| `06-integration-skeleton.md` | 整合骨架（工作稿，非交付物）：章节大纲、逐章来源映射、去重清单。 |
+| `05-prototype.html` | 单文件静态交互原型。 |
+| `07-mcp-spike-report.md` | T10 MCP Spike 报告：写入闸/进度/取消/并发实测结论（限最小实现范围）与未验证项。 |
+| `08-data-connectivity-report.md` | T17 数据连通报告：Logseq 连通（428 条）/ 为知空骨架（数据侧阻塞）。 |
+| `09-query-set-draft.md` | T18 召回评测 query 集草稿（26 条，用户确认）。 |
+| `09-recall-baseline-report.md` | **T20+T26+T27+T31 召回基线报告**：BM25-only recall@1 0.6154 / @5 0.8462 / MRR 0.7003；M3 未胜、跨语言为 BM25 硬盲区。**T26**：M2 接口实现 + 管路自检 14/14。**T27**：线上 embedding（3072 维）真跑 → **hybrid 文件级 recall@1 0.5000 / @5 0.7692 / MRR 0.6324，未强于 BM25-only**，但**跨语言盲区被救回**（§6）。**T31**：本地 embedding（768 维 ×2 模型）真跑 → **bge-base-zh @1 0.3846/@5 0.6154/MRR 0.5042、jina @1 0.4231/@5 0.6923/MRR 0.5579，均未强于 BM25-only、亦低于线上 3072 维**；**跨语言救回依赖模型**（bge 0/3、jina 2/3）（§6.6）。**T33**：融合策略对照（加权 RRF / 表面路由 / 召回并集 / 标题×4，预注册）→ **A/C 均未强于 BM25-only；B 表面路由（jina）@5/@10/MRR 超过 BM25、@1/@3 持平（增益仅来自跨语言 query 选路、bge 下打平）；D 标题×4 提升 BM25 自身 @1 0.6154→0.6923** → **仍无配置使 hybrid 强于 BM25-only**（§6.7）。**T34**：叠加验证（**D1 标题×4 × B 表面路由**，预注册；双基准：旧 M1 ×2 / D1-BM25 ×4）→ 对**同标题权重的公平词法基准 D1-BM25（×4, @1 0.6923/@10 0.8846/MRR 0.7474）**：**jina 仅 @5/@10/MRR 超、@1/@3 持平；bge 逐条完全一致（打平）→ 未强于**；对旧 M1（×2）虽两模型都超，但增益主体来自标题×4（词法侧），**不得记作 hybrid 之效**；**G1-jina 为迄今绝对最好成绩**（@1 0.6923/@10 0.9615/MRR 0.7615）（§6.8）。 |
+| `10-host-support-report.md` | **T19+T22+T24+T25+T29 宿主支持面报告**（§7 + §8）：连接器宿主级 SQLite 管理、支持 stdio、宿主审批记录子系统、挂载须宿主侧动作；**真实宿主实测（T24）**：Cursor elicitation=`[实测]`**支持**、harness elicitation=`[实测]`**不支持**、harness 不带 progressToken；**unknown token 缺陷修复（T25）**：服务端只能就请求方 `_meta.progressToken` 发进度、无 token 不发；**Cursor progress 渲染＝已通过（T29，用户人工判定、非日志实证、UI 渲染不稳定）**。 |
+| `11-import-with-attachments-report.md` | **T21 带附件 Markdown 目录导入报告**：428 md / 204 附件 / 相对引用可解析率 100%、自检 16/16、丢失清单空、朴素正则伪报教训。 |
+
+## 脚本与证据（清理后）
+
+> 2026-10-29：一次性探针与运行产物已移出仓库，评测原始输出统一收在 `research/evidence/`（索引见其 README）。下表按现仓路径给出。
+
+| 文件 | 说明 |
+|------|------|
+| `code/bm25-index.js` + `code/index-root.js` | 共享检索核心（分词 / 切块 / BM25，标题×4）与索引根校验（默认拒绝真源）。 |
+| `code/mcp-server.js` + `code/mcp-selftest.js` | 最小 MCP server（stdio，9 工具）：`search` 真 BM25 + 增量缓存；两阶段写入闸持久化（token 跨重启仍拒重放）并带 `undo_write`；`start_import` 为真实导入 job（manifest / 进度 / 取消 / 检查点），`resume_job` 按检查点续跑；`get_audit` 读追加式审计。 |
+| `code/companion.js` + `code/spike-test.js` | 受信通道签发 token 模拟（HMAC-SHA256，与 server 同源取密钥）与 23 条自动化断言（写入闸 / 工具面 / 进度 / 取消）。 |
+| `code/fs-util.js` + `code/store.js` + `code/infra-selftest.js` | 原子写与目录锁；job / 已用 token / 撤销的持久化状态库（快照 + 追加日志 + 崩溃恢复）与独立审计日志 `audit.jsonl`；配置回退 / 增量索引 / 状态库 / 审计四组自检（38 项）。 |
+| `code/secret-provider.js` + `code/secret-broker-check.js` + `code/secret-broker-selftest.js` | 密钥三级来源（`AWAM_SECRET` → `AWAM_SECRET_CMD` → `secret.key`，统一 ≥16 字符）；签发端与校验端同源；运维检查不打印密钥；18 项自检。密钥 broker 已用真实 Bitwarden 跑通（成功/未解锁/MCP 提交三路）。 |
+| `code/eval-recall.js` | 召回评测 harness（BM25 / M3 扩展 / hybrid = BM25+向量 RRF；`--lex-weight/--vec-weight/--route/--union/--title-weight`；`--selftest` 19 项；端点未配置或不可达即 `unavailable` + 退出码 2；key 仅经 `EMBED_API_KEY` 运行时注入）。 |
+| `research/evidence/t33-preregistration.md` + `out-t33-*` | T33 预注册（先定后跑）与 13 组结果。 |
+| `research/evidence/t34-preregistration.md` + `out-t34-*` | T34 叠加验证预注册与 6 组结果（D1 标题×4 × B 路由 / × A 加权 RRF）。 |
+| `research/evidence/out-hybrid-t27.*` | T27 线上 3072 维真跑（`fetched=761 / cache_hits=0`，非桩）：hybrid @1 0.5000 / @5 0.7692 / MRR 0.6324，未强于 BM25-only。 |
+| `research/evidence/out-hybrid-local-{bge-base-zh,jina}.*` | T31 本地 768 维真跑（`$EMBED_ENDPOINT`，非桩非缓存）：两模型均未强于 BM25-only；跨语言救回依赖模型（bge 0/3、jina 2/3）。 |
+| `research/evidence/out-hybrid-plumbing-stub.*` + `out-hybrid-unavailable.json` | T26 桩管路自检（`not_a_baseline: true`，数字不可引用）与服务不可达实证（退出码 2、无数字）。 |
+| `code/mine-expansion.js` | 语料无监督同义/词形扩展词典生成（独立于 query 集）；产物含私有语料标识，**不入库**，按需重建到仓库外。 |
+| `code/import-md-dir.js` + `code/prepare-test-corpus.js` + `code/scan-links.js` | T21 带附件 Markdown 导入器（深度感知扫描器、密钥扫描、断点复用、NFC/win32 大小写归一、Logseq 块引用对账、自检 31 项）、测试语料准备、链接普查（统计口径较粗，保真度以导入器自检为准）；后两者与 `query-set-check.js` 均带 `--selftest` 并纳入 `npm run selftest`。 |
+| `code/queries-t18.json` + `code/query-set-check.js` + `code/smoke-index.js` | T18 query 集（26 条）、存在性核验与冒烟检索。 |
+| `research/evidence/t21-report-*.md` | T21 导入报告证据（logseq-graph / fixture-full / fixture-noassets）；私有 manifest 未入库。 |
+| `research/07`–`11` | 已删探针（并发对比、宿主探测、embedding 探针、索引诊断）的结论与未验证项都保留在各报告里。 |
+
+---
+
+口径纪律：全文 `[A]`（假设）/`[Q]`（待验证）/`[实测]` 标记保持原样，未跑通项一律保留为未验证项，未外推为生产就绪。

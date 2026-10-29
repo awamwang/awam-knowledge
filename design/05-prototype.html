@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI 知识系统 · 最小交互原型（T5 验证用）</title>
+<style>
+:root{
+  --bg-base:#0E1116; --bg-surface:#161B22; --bg-subtle:#1F242C;
+  --border-line:#2A313B; --text-primary:#E6E9EE; --text-secondary:#9BA3AF; --text-disabled:#5C6672;
+  --accent:#5B8CFF; --accent-fill:#2A63D4; --success:#3FB950; --warning:#D29922; --danger:#F85149; --vault:#A371F7;
+  --space:4px; --r-card:10px; --r-badge:6px; --r-container:14px;
+  --mono:"JetBrains Mono","SF Mono","Cascadia Code",Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg-base); color:var(--text-primary);
+  font:16px/24px Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--accent)}
+.mono{font-family:var(--mono);font-size:13px}
+
+/* 状态条 */
+.statusbar{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 16px;background:var(--bg-surface);border-bottom:1px solid var(--border-line);
+  position:sticky;top:0;z-index:5;
+}
+.statusbar .brand{font-weight:600;font-size:16px;line-height:24px;margin:0;margin-right:auto}
+.dot{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary)}
+.dot i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.dot.ok i{background:var(--success)} .dot.warn i{background:var(--warning)} .dot.off i{background:var(--danger)}
+
+/* 布局 */
+.wrap{max-width:840px;margin:0 auto;padding:16px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 20px}
+.controls .lbl{font-size:12px;color:var(--text-secondary)}
+.button{
+  font:inherit;font-size:13px;padding:6px 12px;min-height:32px;border-radius:var(--r-badge);
+  border:1px solid var(--border-line);background:var(--bg-subtle);color:var(--text-primary);cursor:pointer;
+}
+.button:disabled{opacity:.45;cursor:not-allowed}
+.button:hover{border-color:var(--accent)}
+.button.primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
+.button.danger{border-color:var(--danger);color:var(--danger);background:transparent}
+.button.ghost{background:transparent}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 对话流 L0 */
+.turn{display:flex;gap:12px;margin:18px 0}
+.turn .who{flex:0 0 56px;font-size:12px;color:var(--text-secondary);padding-top:2px}
+.turn .body{flex:1;min-width:0}
+.turn.user .body{color:var(--text-primary)}
+.turn.assistant .who{color:var(--accent)}
+
+/* 系统卡 L1 */
+.card{
+  background:var(--bg-surface);border:1px solid var(--border-line);
+  border-radius:var(--r-card);border-left-width:3px;border-left-style:solid;border-left-color:var(--border-line);
+  padding:12px 14px;margin:8px 0;
+}
+.card.hit{border-left-color:var(--accent)}
+.card.pending{border-left-color:var(--warning)}
+.card.confirmed{border-left-color:var(--success)}
+.card.rejected{border-left-color:var(--text-secondary)}
+.card.vault{border-left-color:var(--vault)}
+.card.blocked{border-left-color:var(--danger)}
+.card h2{margin:0 0 8px;font-size:20px;line-height:28px;font-weight:600}
+
+/* 状态徽标 L2 */
+.badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;line-height:16px;
+  padding:2px 8px;border-radius:999px;border:1px solid var(--border-line);background:var(--bg-subtle);color:var(--text-secondary)}
+.badge.b-hit{color:var(--accent);border-color:var(--accent)}
+.badge.b-pending{color:var(--warning);border-color:var(--warning)}
+.badge.b-confirmed{color:var(--success);border-color:var(--success)}
+.badge.b-vault{color:var(--vault);border-color:var(--vault)}
+.badge.b-danger{color:var(--danger);border-color:var(--danger)}
+
+.src{color:var(--text-secondary);font-size:13px}
+.snippet{background:var(--bg-subtle);border-radius:var(--r-badge);padding:8px 10px;margin:8px 0;font-size:14px}
+.rel{color:var(--text-secondary);font-size:12px;float:right}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+
+/* diff */
+.diff{background:var(--bg-subtle);border-radius:var(--r-badge);padding:8px 10px;margin:8px 0;font-family:var(--mono);font-size:13px;white-space:pre-wrap}
+.diff .add{color:var(--success)}
+.diff .del{color:var(--danger)}
+
+.meta{font-size:12px;color:var(--text-secondary);margin-top:6px}
+.mask{font-family:var(--mono)}
+
+/* 保真度 */
+.meter{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:13px}
+.meter .name{flex:0 0 130px;color:var(--text-secondary)}
+.meter .bar{flex:1;height:8px;background:var(--bg-subtle);border-radius:999px;overflow:hidden}
+.meter .bar>span{display:block;height:100%;background:var(--accent)}
+.meter.warn .bar>span{background:var(--warning)}
+.meter .pct{flex:0 0 44px;text-align:right;font-family:var(--mono);font-size:12px}
+.degraded{background:rgba(210,153,34,.12);border:1px solid rgba(210,153,34,.5);border-radius:var(--r-badge);padding:8px 10px;margin-top:8px;font-size:13px;color:var(--text-primary)}
+
+.banner{border-radius:var(--r-badge);padding:8px 10px;font-size:13px;margin-top:8px}
+.banner.ok{background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.5)}
+.banner.danger{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.5);color:var(--text-primary)}
+.hide{display:none !important}
+.note{color:var(--text-secondary);font-size:12px}
+footer{max-width:840px;margin:24px auto;padding:0 16px 40px;color:var(--text-secondary);font-size:12px}
+
+@media (max-width:640px){
+  .wrap{padding:12px}
+  .turn .who{flex-basis:40px}
+  .card h2{font-size:18px}
+  .meter .name{flex-basis:96px}
+  .button{width:100%}
+  .row .button{width:auto;flex:1}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important;animation:none !important}
+}
+</style>
+</head>
+<body>
+
+<header class="statusbar">
+  <h1 class="brand">本地知识层 · 会话</h1>
+  <span class="dot ok" title="召回可用性"><i></i>召回可用</span>
+  <span class="dot warn" title="密钥工具连接"><i></i>密钥已连·Bitwarden</span>
+  <span class="dot ok" title="索引状态"><i></i>索引就绪</span>
+</header>
+
+<div class="wrap">
+
+  <div class="controls">
+    <span class="lbl">演示控制（模拟状态切换）：</span>
+    <button class="button" id="btn-noresult">召回：无结果态</button>
+    <button class="button" id="btn-lowconf">召回：低置信态</button>
+    <button class="button" id="btn-blocked">写入：疑似密钥阻断态</button>
+    <button class="button" id="btn-autofail">反填：失败态</button>
+  </div>
+
+  <main class="conversation" role="main" aria-label="会话主视图 V0">
+
+    <!-- 用户提问 -->
+    <div class="turn user">
+      <div class="who">你</div>
+      <div class="body">上次那个 MCP 超时怎么解决的，我忘了关键词</div>
+    </div>
+
+    <!-- 召回结果卡（命中） -->
+    <div class="turn assistant">
+      <div class="who">AI</div>
+      <div class="body">
+        <section class="card hit" id="card-hit" data-testid="result-hit" aria-label="召回结果">
+          <span class="badge b-hit" data-testid="badge-hit">命中 2 条 · 语义检索(BM25+向量)</span>
+          <div class="snippet">…把 stdio 传输改为 sse，并加大 timeout 到 60s…
+            <div class="src mono">notes/mcp/troubleshooting.md#L42</div>
+          </div>
+          <div class="snippet">…MCP 冷启动超时 → 预加载 + keepalive…
+            <div class="src mono">notes/2026-08-03.md#L10</div>
+          </div>
+          <div class="row">
+            <button class="button ghost">展开全文</button>
+            <button class="button ghost">复制引用</button>
+          </div>
+        </section>
+
+        <!-- 无结果态 / 低置信态 -->
+        <section class="card hide" id="card-noresult" data-testid="result-none" aria-label="未找到">
+          <span class="badge">未找到</span>
+          <div class="snippet">在本地知识库中没有匹配到相关记录。<span class="note">（未编造内容）</span></div>
+          <div class="meta">建议：换个说法再试 · 或确认该内容是否已导入</div>
+          <div class="row"><button class="button ghost">查看已导入范围</button></div>
+        </section>
+
+        <section class="card hide" id="card-lowconf" data-testid="result-lowconf" aria-label="低置信">
+          <span class="badge b-pending">低置信 · 以下可能相关，请确认</span>
+          <div class="snippet">…sse / timeout（相似度 0.51，可能不准确）…</div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 写入确认卡 -->
+    <div class="turn assistant">
+      <div class="who">AI</div>
+      <div class="body">
+        <section class="card pending" id="card-write" data-testid="write-confirm" role="alertdialog" aria-live="assertive" aria-label="待确认写入">
+          <span class="badge b-pending" id="write-badge" data-testid="write-badge">待确认 · 写入知识库</span>
+          <h2 id="write-title">拟新增：notes/ai/mcp-notes.md</h2>
+          <div class="diff" id="write-diff"><span class="add">+ ## MCP 超时处理</span>
+<span class="add">+ stdio → sse，timeout 60s</span></div>
+          <div class="meta">来源：本次会话 · 会话 #a13f · AI 置信度 中</div>
+          <div class="meta" id="scan-ok">安全：✔ 未检出密钥明文（脱敏扫描通过）</div>
+          <div class="banner danger hide" id="scan-block" data-testid="scan-block">检测到疑似密钥/凭据。知识库不存明文，请改用密钥工具登记，条目里只保留账号引用。</div>
+          <div class="row" id="write-actions">
+            <button class="button danger" id="btn-reject" data-testid="btn-reject">放弃</button>
+            <button class="button" id="btn-edit">编辑后存</button>
+            <button class="button primary" id="btn-confirm" data-testid="btn-confirm">确认写入</button>
+          </div>
+          <div class="row hide" id="write-done">
+            <button class="button ghost" id="btn-undo" data-testid="btn-undo">撤销本次写入</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 密钥引用 / 反填层 -->
+    <div class="turn assistant">
+      <div class="who">AI</div>
+      <div class="body">
+        <section class="card vault" data-testid="secret-ref" aria-label="凭据引用">
+          <span class="badge b-vault">🔒 凭据引用 · vault:github/pat#1</span>
+          <div class="meta">账号：<span class="mono">github-work</span>（知识库只存"哪里有账号"）</div>
+          <div class="meta">用途：CI token，用于 repo X</div>
+          <div class="meta">存放：Bitwarden ▸ 保险库默认（<strong>不显示任何 secret 字符</strong>）</div>
+          <div class="row">
+            <button class="button ghost">复制引用</button>
+            <button class="button" id="btn-fill" data-testid="btn-fill">反填到当前窗口</button>
+            <button class="button ghost" id="btn-peek">短暂显示</button>
+          </div>
+          <div class="banner hide" id="fill-status" data-testid="fill-status" aria-live="polite"></div>
+          <div class="meta mask hide" id="peek-row">secret：<span id="peek-value">sk_l••••••••••••••••••••3f2a</span> · <span id="peek-count">5</span>s 后自动复原</div>
+        </section>
+      </div>
+    </div>
+
+    <!-- 导入向导卡 -->
+    <div class="turn assistant">
+      <div class="who">AI</div>
+      <div class="body">
+        <section class="card" data-testid="import-wizard" aria-label="导入向导">
+          <span class="badge">导入历史知识 · 步骤 ②/③ 预览与保真度</span>
+          <h2>来源：Logseq · 预计条目 1,248</h2>
+          <div class="meter"><span class="name">条目数一致率</span><span class="bar"><span style="width:98%"></span></span><span class="pct">98%</span></div>
+          <div class="meter warn"><span class="name">标签/双链保留率</span><span class="bar"><span style="width:71%"></span></span><span class="pct">71%</span></div>
+          <div class="meter warn"><span class="name">附件可用率</span><span class="bar"><span style="width:83%"></span></span><span class="pct">83%</span></div>
+          <div class="degraded" data-testid="lost-list">⚠ 丢失清单（3 类，展开查看，不静默丢弃）：未解析双链 214 · 缺失附件 87 · 自定义块 12</div>
+          <div class="meta">为知笔记来源：格式待验证，暂不可用（不阻塞其它来源）</div>
+          <div class="row">
+            <button class="button">取消</button>
+            <button class="button primary" data-testid="btn-import-confirm">确认导入（写收紧）</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<footer>
+  T5 最小交互原型 · 仅演示 T3 流程中的关键状态与 T4 的状态语言；全部数据为硬编码模拟，未接真实 MCP / 检索 / 密码管理器。<br/>
+  模拟状态：卡片状态机（待确认/已确认·可撤销/已撤销/命中/未找到/凭据引用/阻断）、密钥脱敏与反填结果、导入保真度与丢失清单。
+</footer>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ---- 召回：无结果 / 低置信 切换 ----
+  $('btn-noresult').addEventListener('click', function () {
+    $('card-hit').classList.add('hide');
+    $('card-lowconf').classList.add('hide');
+    $('card-noresult').classList.toggle('hide');
+    if ($('card-noresult').classList.contains('hide')) $('card-hit').classList.remove('hide');
+  });
+  $('btn-lowconf').addEventListener('click', function () {
+    $('card-hit').classList.add('hide');
+    $('card-noresult').classList.add('hide');
+    $('card-lowconf').classList.toggle('hide');
+  });
+
+  // ---- 写入确认卡状态机 ----
+  var write = $('card-write');
+  var badge = $('write-badge');
+  var blocked = false;
+
+  $('btn-blocked').addEventListener('click', function () {
+    blocked = !blocked;
+    $('scan-block').classList.toggle('hide', !blocked);
+    $('scan-ok').classList.toggle('hide', blocked);
+    write.classList.toggle('blocked', blocked);
+    write.classList.toggle('pending', !blocked);
+    badge.className = 'badge ' + (blocked ? 'b-danger' : 'b-pending');
+    badge.textContent = blocked ? '已阻断 · 疑似密钥' : '待确认 · 写入知识库';
+    $('btn-confirm').disabled = blocked;
+  });
+
+  $('btn-confirm').addEventListener('click', function () {
+    if (blocked) return;
+    write.className = 'card confirmed';
+    badge.className = 'badge b-confirmed';
+    badge.textContent = '已确认 · 可撤销';
+    $('write-title').textContent = '已写入 notes/ai/mcp-notes.md（+2 行）';
+    $('write-actions').classList.add('hide');
+    $('write-done').classList.remove('hide');
+  });
+
+  $('btn-reject').addEventListener('click', function () {
+    write.className = 'card rejected';
+    badge.className = 'badge';
+    badge.textContent = '已放弃 · 未写入（零副作用）';
+    $('write-actions').classList.add('hide');
+  });
+
+  $('btn-undo').addEventListener('click', function () {
+    badge.className = 'badge';
+    badge.textContent = '已撤销';
+    $('write-done').classList.add('hide');
+  });
+
+  // ---- 反填 / 短暂显示 ----
+  $('btn-fill').addEventListener('click', function () {
+    var s = $('fill-status');
+    s.classList.remove('hide');
+    s.className = 'banner ok';
+    s.textContent = '✔ 已通过 Bitwarden 填充，系统未接触明文；本页不显示、不缓存、不记录 secret。';
+  });
+  $('btn-autofail').addEventListener('click', function () {
+    var s = $('fill-status');
+    s.classList.remove('hide');
+    s.className = 'banner danger';
+    s.textContent = '✖ 填充失败：vault:github/pat#1 · 错误码 404（条目不存在）。不回显任何 secret 片段。';
+  });
+  $('btn-peek').addEventListener('click', function () {
+    var row = $('peek-row');
+    row.classList.remove('hide');
+    var n = 5; $('peek-count').textContent = n;
+    var t = setInterval(function () {
+      n -= 1; $('peek-count').textContent = n;
+      if (n <= 0) { clearInterval(t); row.classList.add('hide'); }
+    }, 1000);
+  });
+})();
+</script>
+</body>
+</html>

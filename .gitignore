@@ -1,0 +1,40 @@
+# 依赖
+node_modules/
+
+# 运行 / 测试产物
+.spike-runtime/
+code/data/
+tmp/
+/out.json
+/out.md
+code/embed-cache*.json
+shots/
+**/ui-shots/
+**/m3-expansion-dict*.json
+*-expansion-dict*.json
+index-cache.json
+**/audit.jsonl
+**/*.partial.json
+
+# 私有评测集（仓库内仅保留示例 queries-t18.json；真实集在仓外）
+code/queries.local.json
+code/queries-t18.local.json
+
+# 调研过程与证据（非代码运转所需；本机可留副本，正式私有副本见仓外）
+/research/
+
+# 环境与密钥
+.env
+.env.*
+*.log
+secret.key
+secret.txt
+
+# IDE / 系统杂项
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

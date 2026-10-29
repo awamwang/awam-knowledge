@@ -1,0 +1,20 @@
+{
+  "name": "awam-knowledge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地 Markdown 知识库的召回/导入/评测工具（零依赖 Node 脚本）",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "selftest": "node code/eval-recall.js --selftest && node code/infra-selftest.js && node code/secret-broker-selftest.js && node code/mcp-selftest.js && node code/import-md-dir.js --selftest && node code/scan-links.js --selftest && node code/prepare-test-corpus.js --selftest && node code/query-set-check.js --selftest && node code/spike-test.js",
+    "test": "npm run selftest",
+    "smoke": "node code/smoke-index.js",
+    "eval": "node code/eval-recall.js",
+    "import": "node code/import-md-dir.js",
+    "mcp": "node code/mcp-server.js",
+    "ui-check": "node code/ui-render-check.js",
+    "mine-dict": "node code/mine-expansion.js"
+  }
+}

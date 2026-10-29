@@ -1,0 +1,12 @@
+[
+  { "id": "Q01", "type": "精确术语", "query": "向量检索", "expect": ["pages/向量检索.md"] },
+  { "id": "Q02", "type": "精确术语", "query": "倒排索引", "expect": ["pages/倒排索引.md"] },
+  { "id": "Q03", "type": "精确术语", "query": "混合检索", "expect": ["pages/混合检索.md"] },
+  { "id": "Q04", "type": "同义换述", "query": "怎么让搜索既懂关键词又懂语义", "expect": ["pages/混合检索.md"] },
+  { "id": "Q05", "type": "同义换述", "query": "笔记全文搜索是怎么做出来的", "expect": ["pages/倒排索引.md"] },
+  { "id": "Q06", "type": "跨语言", "query": "vector retrieval", "expect": ["pages/向量检索.md"] },
+  { "id": "Q07", "type": "跨语言", "query": "inverted index", "expect": ["pages/倒排索引.md"] },
+  { "id": "Q08", "type": "多跳组合", "query": "用本地知识库做检索增强", "expect": ["pages/检索增强生成.md", "pages/混合检索.md"] },
+  { "id": "Q09", "type": "模糊口语", "query": "我想让 AI 帮我记住东西", "expect": ["pages/个人知识库.md"] },
+  { "id": "Q10", "type": "模糊口语", "query": "密码账号信息放哪管理", "expect": ["pages/凭据管理.md"] }
+]
