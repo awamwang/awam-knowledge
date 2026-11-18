@@ -46,13 +46,17 @@ export KM_SOURCE_ID=logseq-main
 
 - **默认**：BM25 + **标题权重 ×4**，20 行切块，CJK bigram + ASCII 词
 - **hybrid 非默认**：`--mode hybrid` 需显式指定 embedding 端点（`--embed-endpoint` 或 `EMBED_ENDPOINT`），未配置时输出 `unavailable` 并退出码 2，不产数字
-- 评测**未证明 hybrid 强于** 标题×4 的 BM25（原始数字在仓外 `awam-knowledge.private/research/`）
-- 评测方向已收口（2026-10-29）：**以标题×4 的 BM25 为主，向量仅作跨语言兜底**，不再新增评测轮次
+- **bm25-rerank 非默认**：`--mode bm25-rerank` 需 `--rerank-endpoint` 或 `RERANK_ENDPOINT`（BM25 召回 top-N → 精排）；未配置同样 `unavailable` + 退出码 2
+- 评测**未证明 hybrid 强于** 标题×4 的 BM25（原始数字在仓外 `awam-knowledge.private/research/`）；**rerank 对照尚未跑数**
+- 评测方向曾收口（2026-10-29）：以标题×4 的 BM25 为主；**rerank 为重新开测的一条刀**，须先定后跑、对照同 `title-weight` 的 BM25
 
 ```bash
 node code/smoke-index.js --queries "知识库|Logseq"
 # 仓库内 queries-t18.json 为脱敏示例；真实 26 条用仓外私有集
 node code/eval-recall.js --queries-json ../awam-knowledge.private/queries-t18.json --topn 50 --md-out out.md > out.json
+# M4 · BM25 + Rerank（公平对照：同 title-weight 的 bm25）
+node code/eval-recall.js --mode bm25 --title-weight 4 --queries-json ../awam-knowledge.private/queries-t18.json --topn 50 --md-out out-bm25.md > out-bm25.json
+node code/eval-recall.js --mode bm25-rerank --title-weight 4 --rerank-endpoint "$RERANK_ENDPOINT" --rerank-model jina-reranker-v2-base-multilingual --queries-json ../awam-knowledge.private/queries-t18.json --topn 50 --md-out out-rerank.md > out-rerank.json
 ```
 
 ## MCP server
@@ -75,6 +79,16 @@ node code/eval-recall.js --queries-json ../awam-knowledge.private/queries-t18.js
 
 状态库为快照 + 追加日志；同一状态目录只允许一个写者，第二个进程只读并返回 `state_locked`。
 
+## HTTP 服务（AFM 集成）
+
+`code/http-server.js` 是面向**本机 UI**（AFM 搜索面板）的常驻 HTTP 服务（默认 `127.0.0.1:18790`，契约见
+`design/afm-http-service-design.md`）：`GET /health` 探活 + `POST /search`（BM25 内容检索，命中块做
+「见保险库 / [REDACTED:]」引用提取）+ `POST /vault/status|reveal|unlock|lock`（代理脱敏体系
+`agent_secret.py` 人机通道，ADR-002）。除 `/health` 外全部 `Bearer KM_SERVICE_TOKEN` 鉴权（常量时间比较），
+`KM_SERVICE_TOKEN` 未设置启动即退出（码 2）。明文只出现在 `/vault/reveal` 响应体（`Cache-Control: no-store`），
+不写日志、不进缓存；访问日志只有「方法+路径+状态码」。与 MCP server 进程/端口/鉴权独立，共享 `bm25-index.js`
+与索引根约定；`npm run http` 启动，`node code/http-server.js --selftest` 自检（17 项）。
+
 密钥来源集中在 `code/secret-provider.js`（`AWAM_SECRET` → `AWAM_SECRET_CMD` → `secret.key`，长度不足 16 一律报错），
 签发端 `companion.js` 与校验端 `mcp-server.js` 共用同一解析。命令继承进程环境，因此 Bitwarden 的 `BW_SESSION` 直接透传：
 
@@ -87,8 +101,8 @@ node code/secret-broker-check.js              # 结论：source / length / 两�
 ## 自检
 
 ```bash
-npm run selftest   # 9 个脚本 / 220 项：eval 19、infra 38、secret 18、mcp 60、import 31、
-                   # scan-links 16、prepare 9、query-set 6、spike 23
+npm run selftest   # 10 个脚本：eval 23、infra 38、secret 18、mcp 60、import 31、
+                   # scan-links 16、prepare 9、query-set 6、spike 23、http-server 17
 ```
 
 自检只用临时语料与临时状态目录，不读私有数据；所有产物写完即删。
@@ -100,10 +114,11 @@ npm run selftest   # 9 个脚本 / 220 项：eval 19、infra 38、secret 18、mc
 | `bm25-index.js` | 共享检索核心（分词、切块、BM25、搜索、增量缓存） |
 | `index-root.js` | 索引根解析与校验（环境变量 / settings.yaml / 拒绝真源） |
 | `fs-util.js` / `store.js` | 原子写与目录锁；job / token / undo 的持久化状态库；独立追加式审计 `audit.jsonl` |
-| `eval-recall.js` | 召回评测（bm25 / m3 / hybrid，含 `--selftest`） |
+| `eval-recall.js` | 召回评测（bm25 / m3 / hybrid / bm25-rerank，含 `--selftest` 23 项） |
 | `smoke-index.js` | 索引冒烟检索 |
 | `import-md-dir.js` | 带附件 Markdown 目录导入（深度感知链接解析、密钥扫描、断点复用、`--resume`、NFC/win32 大小写归一、Logseq 块引用对账） |
 | `mcp-server.js` / `mcp-selftest.js` | MCP server 与端到端自检（含跨重启、取消、崩溃后续跑与单写者锁） |
+| `http-server.js` | 面向本机 UI（AFM）的常驻 HTTP 服务：内容检索 + vault 引用提取 + 人机通道代理（`--selftest` 17 项） |
 | `companion.js` | 一次性 token 签发模拟（与 server 同源取密钥） |
 | `secret-provider.js` | 密钥三级来源解析（环境变量 / 外部命令 / 本地 0600 文件） |
 | `secret-broker-check.js` | 运维自检：确认密钥来源可用且签发端与校验端同源（不打印密钥） |
