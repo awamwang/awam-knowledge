@@ -21,6 +21,13 @@
  *   #   脚本只从 env 读取并置于 Authorization: Bearer 头，**绝不写入任何文件/日志/缓存**。
  *   #   EMBED_API_KEY=****** node eval-recall.js --mode hybrid --embed-api-key-env EMBED_API_KEY ...
  *   # 服务不可达时：退出码 2 + status=unavailable（绝不产出任何数字）
+ *   # M4 · BM25 召回 + Rerank 精排（非默认；对照基线 = mode=bm25 标题×4）
+ *   node eval-recall.js --mode bm25-rerank --root "<graphRoot>" --queries-json "<q.json>" \
+ *        --rerank-endpoint "http://192.168.x.x:8001/v1/rerank" \
+ *        --rerank-model "jina-reranker-v2-base-multilingual" \
+ *        --topn 50 --title-weight 4 --k 1,3,5,10 --md-out "<out.md>"
+ *   # 亦可设 RERANK_ENDPOINT / RERANK_MODEL；可选 RERANK_API_KEY（仅内存、不落盘）
+ *   # 端点未配置或不可达：退出码 2 + status=unavailable（绝不产出任何数字）
  *   # 自检
  *   node eval-recall.js --selftest
  *
@@ -30,9 +37,9 @@
  *   - chunk 级（辅）: 不去重，直接取 top-k chunk —— 量化"长文件多 chunk 占位稀释"
  *   - 指标: recall@k (k∈{1,3,5,10}) + MRR，两套口径各报一次
  *
- * 边界: 只读源数据；不写/不改用户文件。mode=hybrid 不产出任何数字。
+ * 边界: 只读源数据；不写/不改用户文件。mode=hybrid / bm25-rerank 端点缺失时不产出任何数字。
  *
- * 默认召回（评测结论）: mode=bm25 + 标题×4；hybrid 仅显式 --mode hybrid，非默认。
+ * 默认召回（评测结论）: mode=bm25 + 标题×4；hybrid / bm25-rerank 仅显式开启，非默认。
  * 若 ROOT 下存在 index.json（脱敏仓 build_index 旁路产物），用于文档清单与标题加权。
  */
 const fs = require('fs');
@@ -45,7 +52,7 @@ function arg(name, dflt) {
   return i >= 0 && process.argv[i + 1] !== undefined ? process.argv[i + 1] : dflt;
 }
 const SELFTEST = process.argv.includes('--selftest');
-const MODE = arg('mode', 'bm25');                 // bm25 | m3 | hybrid
+const MODE = arg('mode', 'bm25');                 // bm25 | m3 | hybrid | bm25-rerank
 const STEM = process.argv.includes('--stem');     // 词形规整（规则型）
 const DICT_PATH = arg('dict', '');                // 语料无监督扩展词典
 const EXPW = Number(arg('expand-weight', '0.35'));// 扩展词权重
@@ -76,7 +83,21 @@ const EMBED_API_KEY_ENV = arg('embed-api-key-env', 'EMBED_API_KEY'); // 只读 e
 const EMBED_API_KEY = process.env[EMBED_API_KEY_ENV] || '';         // 仅驻留内存，用于 Authorization 头
 const HYBRID_STUB = process.argv.includes('--hybrid-stub'); // 进程内桩向量：仅管路自检，非语义基线
 const PLUMBING_ONLY = process.argv.includes('--plumbing-only'); // 外部桩服务场景：结果标为非基线、不可引用
-const NON_BASELINE = HYBRID_STUB || PLUMBING_ONLY;
+// ---- M4 · BM25 + Rerank ----
+const RERANK_ENDPOINT = arg('rerank-endpoint', process.env.RERANK_ENDPOINT || '');
+const RERANK_MODEL = arg('rerank-model', process.env.RERANK_MODEL || 'jina-reranker-v2-base-multilingual');
+const RERANK_CANDIDATES = Number(arg('rerank-candidates', String(TOPN))); // 送入精排的 BM25 top-N（默认=topn）
+const RERANK_DOC_CHARS = Number(arg('rerank-doc-chars', '512')); // 每条候选送精排前截断（0=不截；防服务端 OOM/超长）
+const RERANK_TIMEOUT = Number(arg('rerank-timeout', '120000'));
+const RERANK_RETRIES = Number(arg('rerank-retries', '3'));
+const RERANK_CONCURRENCY = Number(arg('rerank-concurrency', '1')); // 默认串行，避免压垮局域网 GPU
+const RERANK_API_KEY_ENV = arg('rerank-api-key-env', 'RERANK_API_KEY');
+const RERANK_API_KEY = process.env[RERANK_API_KEY_ENV] || '';
+const RERANK_STUB = process.argv.includes('--rerank-stub'); // 进程内桩精排：仅管路自检，非语义基线
+/** 精排闸门：all=每条都排；xlang=纯 ASCII；lowconf=含汉字且 BM25 top1 < 阈值；可逗号组合 */
+const RERANK_GATE = String(arg('rerank-gate', 'all')).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const RERANK_LOWCONF_SCORE = Number(arg('rerank-lowconf-score', '15'));
+const NON_BASELINE = HYBRID_STUB || PLUMBING_ONLY || RERANK_STUB;
 const crypto = require('crypto');
 
 let DICT = null;
@@ -329,6 +350,146 @@ async function computeEmbeddings(texts, queries, opts) {
   return { docVecs: texts.map(t => cache.vectors[embedKey(opts.model, t)]), queryVecs: queries.map(q => cache.vectors[embedKey(opts.model, q.query)]), stats: { cache_hits: cacheHits, fetched, unique_texts: unique.size, dim } };
 }
 
+// ---------------- M4 · BM25 + Rerank ----------------
+/** 解析常见 rerank 响应：{results|data:[...]} 或裸数组；项含 index + relevance_score|score。 */
+function parseRerankResponse(body, nDocs) {
+  const raw = Array.isArray(body) ? body
+    : (body && Array.isArray(body.results) ? body.results
+      : (body && Array.isArray(body.data) ? body.data : null));
+  if (!raw) throw new Error('unexpected rerank response shape: ' + JSON.stringify(body).slice(0, 200));
+  const out = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const index = Number(item.index);
+    const score = item.relevance_score !== undefined ? Number(item.relevance_score)
+      : (item.score !== undefined ? Number(item.score) : NaN);
+    if (!Number.isInteger(index) || index < 0 || index >= nDocs || !Number.isFinite(score)) {
+      throw new Error('invalid rerank item: ' + JSON.stringify(item).slice(0, 120));
+    }
+    out.push({ index, relevance_score: score });
+  }
+  if (!out.length) throw new Error('rerank returned empty results');
+  return out;
+}
+/** 按精排分数降序重排候选；未出现在 results 中的候选保持原相对序垫后。 */
+function applyRerankScores(candidates, results) {
+  const scoreByIdx = new Map();
+  for (const r of results) scoreByIdx.set(r.index, r.relevance_score);
+  const scored = [];
+  const rest = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i];
+    if (scoreByIdx.has(i)) scored.push({ ...c, score: scoreByIdx.get(i), rerank_score: scoreByIdx.get(i) });
+    else rest.push({ ...c });
+  }
+  scored.sort((a, b) => b.score - a.score || a.di - b.di);
+  return scored.concat(rest);
+}
+/** 桩精排：确定性伪分（非语义），只验证客户端/解析/重排管路。 */
+function stubRerankResults(query, documents) {
+  return documents.map((doc, index) => {
+    const h = crypto.createHash('sha256').update(String(query)).update('\u0000').update(String(doc)).digest();
+    const score = (h[0] + h[1] * 256) / 65535; // [0,1)
+    return { index, relevance_score: score };
+  }).sort((a, b) => b.relevance_score - a.relevance_score);
+}
+async function rerankRequest(query, documents, opts) {
+  if (!documents.length) return [];
+  if (opts.stub) return stubRerankResults(query, documents);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeout);
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (opts.apiKey) headers['Authorization'] = 'Bearer ' + opts.apiKey;
+    const topN = opts.topN != null ? opts.topN : documents.length;
+    let lastErr;
+    const attempts = Math.max(1, opts.retries || 1);
+    for (let a = 0; a < attempts; a++) {
+      try {
+        const res = await fetch(opts.endpoint, {
+          method: 'POST', headers,
+          body: JSON.stringify({ model: opts.model, query, documents, top_n: topN }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          throw new Error('HTTP ' + res.status + ' ' + String(t).slice(0, 200));
+        }
+        const j = await res.json();
+        return parseRerankResponse(j, documents.length);
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  } finally { clearTimeout(timer); }
+}
+function clipRerankDoc(text, maxChars) {
+  const s = String(text || '');
+  if (!maxChars || maxChars <= 0 || s.length <= maxChars) return s;
+  return s.slice(0, maxChars);
+}
+function parseRerankGates(gates) {
+  const g = (Array.isArray(gates) ? gates : String(gates || 'all').split(','))
+    .map(s => String(s).trim().toLowerCase()).filter(Boolean);
+  return g.length ? g : ['all'];
+}
+/**
+ * 是否对本 query 启用精排（只读 query 字面 + BM25 榜首分数，不看答案）。
+ * - all：全开
+ * - xlang：纯 ASCII（跨语言表面启发式）
+ * - lowconf：含汉字且存在候选，且 top1 BM25 分 < lowconfScore
+ */
+function shouldRerankQuery(query, cands, gates, lowconfScore) {
+  const g = parseRerankGates(gates);
+  if (g.includes('all')) return { apply: true, reasons: ['all'] };
+  const reasons = [];
+  const ascii = !hasCJK(query);
+  if (g.includes('xlang') && ascii) reasons.push('xlang');
+  const top1 = cands && cands[0] && typeof cands[0].score === 'number' ? cands[0].score : null;
+  if (g.includes('lowconf') && !ascii && top1 !== null && top1 < lowconfScore) reasons.push('lowconf');
+  return { apply: reasons.length > 0, reasons, top1 };
+}
+/** 对每条 query：BM25 top-C →（按闸门）rerank → 返回与 queries 对齐的列表。 */
+async function computeBm25Rerank(queries, docs, idx, opts) {
+  const candN = Math.max(1, opts.candidates || TOPN);
+  const docChars = opts.docChars != null ? opts.docChars : RERANK_DOC_CHARS;
+  const gates = parseRerankGates(opts.gates != null ? opts.gates : RERANK_GATE);
+  const lowconfScore = opts.lowconfScore != null ? opts.lowconfScore : RERANK_LOWCONF_SCORE;
+  const lexLists = queries.map(q => {
+    const w = new Map();
+    for (const t of tokenize(q.query, opts.stem)) w.set(t, 1);
+    return rankAll(docs, idx, w).slice(0, candN);
+  });
+  const out = new Array(queries.length);
+  const decisions = new Array(queries.length);
+  let qi = 0;
+  const worker = async () => {
+    while (qi < queries.length) {
+      const i = qi++;
+      const cands = lexLists[i];
+      const dec = shouldRerankQuery(queries[i].query, cands, gates, lowconfScore);
+      decisions[i] = { id: queries[i].id, apply: dec.apply, reasons: dec.reasons || [], top1: dec.top1 == null ? null : Number(dec.top1.toFixed(4)) };
+      if (!cands.length) { out[i] = cands; continue; }
+      if (!dec.apply) { out[i] = cands; continue; }
+      const texts = cands.map(r => clipRerankDoc(docs[r.di].text, docChars));
+      const results = await rerankRequest(queries[i].query, texts, opts);
+      out[i] = applyRerankScores(cands, results);
+    }
+  };
+  const lane = Math.max(1, Math.min(opts.concurrency || 1, queries.length || 1));
+  await Promise.all(Array.from({ length: lane }, () => worker()));
+  const applied = decisions.filter(d => d.apply).map(d => d.id);
+  return {
+    lists: out,
+    decisions,
+    stats: {
+      candidates: candN, doc_chars: docChars, queries: queries.length, stub: !!opts.stub,
+      gates, lowconf_score: lowconfScore,
+      reranked: applied.length, reranked_ids: applied,
+      skipped: decisions.length - applied.length,
+    },
+  };
+}
+
 // ---------------- Markdown ----------------
 function toMarkdown(meta, res) {
   const L = [];
@@ -407,6 +568,26 @@ function selftest() {
     ['表面路由：含汉字 → true', hasCJK('向量检索') === true],
     ['表面路由：纯 ASCII → false', hasCJK('vector retrieval') === false],
   );
+  // M4 · rerank 纯函数 / 桩管路（不触网）
+  const parsed = parseRerankResponse({ results: [{ index: 2, relevance_score: 0.9 }, { index: 0, relevance_score: 0.1 }] }, 3);
+  const cands = [{ di: 10, path: 'a' }, { di: 11, path: 'b' }, { di: 12, path: 'c' }];
+  const reordered = applyRerankScores(cands, [{ index: 2, relevance_score: 5 }, { index: 0, relevance_score: 1 }]);
+  const stubbed = stubRerankResults('向量检索', ['甲', '乙', '丙']);
+  const partial = applyRerankScores(cands, [{ index: 1, relevance_score: 9 }]);
+  checks.push(
+    ['rerank 解析：保留 index 与分数', parsed.length === 2 && parsed[0].index === 2 && parsed[0].relevance_score === 0.9],
+    ['rerank 重排：高分在前 (di=12→10)', reordered[0].di === 12 && reordered[1].di === 10],
+    ['rerank 重排：未打分项垫后且不丢候选', partial.length === 3 && partial[0].di === 11 && partial[1].di === 10 && partial[2].di === 12],
+    ['rerank 桩：条数=文档数且含 index', stubbed.length === 3 && stubbed.every(x => Number.isInteger(x.index))],
+    ['rerank 截断：超长保留前 N 字', clipRerankDoc('abcdefghij', 4) === 'abcd'],
+    ['rerank 截断：0 表示不截', clipRerankDoc('abcdefghij', 0) === 'abcdefghij'],
+    ['闸门 all → 启用', shouldRerankQuery('向量检索', [{ score: 30 }], 'all', 15).apply === true],
+    ['闸门 xlang：ASCII → 启用', shouldRerankQuery('vector retrieval', [{ score: 3 }], 'xlang', 15).apply === true],
+    ['闸门 xlang：含汉字 → 跳过', shouldRerankQuery('向量检索', [{ score: 3 }], 'xlang', 15).apply === false],
+    ['闸门 lowconf：低分中文 → 启用', shouldRerankQuery('模糊说法', [{ score: 10 }], 'lowconf', 15).apply === true],
+    ['闸门 lowconf：高分中文 → 跳过', shouldRerankQuery('精确术语', [{ score: 40 }], 'lowconf', 15).apply === false],
+    ['闸门 lowconf：ASCII 不走低置信', shouldRerankQuery('vector', [{ score: 3 }], 'lowconf', 15).apply === false],
+  );
   const failed = checks.filter(c => !c[1]).map(c => c[0]);
   console.log(JSON.stringify({ selftest: true, docs: docs.length, checks: checks.length, failed, pass: failed.length === 0,
     summary: res.summary, per_query: res.perQuery.map(p => ({ id: p.id, file_rank: p.file_rank, chunk_rank: p.chunk_rank })) }, null, 2));
@@ -415,7 +596,64 @@ function selftest() {
 
 // ---------------- main ----------------
 if (SELFTEST) { selftest(); }
-else if (MODE === 'hybrid') {
+else if (MODE === 'bm25-rerank') {
+  if (!QJSON) { console.error('需要 --queries-json <path>（或用 --selftest）'); process.exit(1); }
+  if (!RERANK_ENDPOINT && !RERANK_STUB) {
+    console.log(JSON.stringify({
+      mode: 'bm25-rerank', status: 'unavailable', reason: 'endpoint_not_configured',
+      note: '未提供 rerank 端点：请传 --rerank-endpoint 或设置 RERANK_ENDPOINT。不产出任何数字。',
+    }, null, 2));
+    process.exit(2);
+  }
+  (async () => {
+    const queries = JSON.parse(fs.readFileSync(QJSON, 'utf8'));
+    const opts = { stem: STEM, dict: DICT, expw: EXPW };
+    const built = buildFromDisk(ROOT, STEM);
+    const idx = buildIndex(built.docs);
+    let rr;
+    try {
+      rr = await computeBm25Rerank(queries, built.docs, idx, {
+        endpoint: RERANK_ENDPOINT, model: RERANK_MODEL, candidates: RERANK_CANDIDATES,
+        docChars: RERANK_DOC_CHARS, gates: RERANK_GATE, lowconfScore: RERANK_LOWCONF_SCORE,
+        timeout: RERANK_TIMEOUT, retries: RERANK_RETRIES, concurrency: RERANK_CONCURRENCY,
+        apiKey: RERANK_API_KEY, stub: RERANK_STUB, stem: STEM, topN: RERANK_CANDIDATES,
+      });
+    } catch (e) {
+      console.log(JSON.stringify({
+        mode: 'bm25-rerank', status: 'unavailable', reason: 'rerank_unreachable',
+        endpoint: RERANK_ENDPOINT, model: RERANK_MODEL, error: String(e && e.message || e),
+        note: 'rerank 服务不可达或响应异常。不产出任何对比数字；服务可用后按同一命令重跑即可。',
+      }, null, 2));
+      process.exit(2);
+    }
+    const ranker = (q) => rr.lists[queries.indexOf(q)];
+    const res = evaluate(queries, built.docs, idx, TOPN, KS, opts, ranker);
+    const gateTag = parseRerankGates(RERANK_GATE).join('+');
+    const label = RERANK_STUB
+      ? 'M4-管路自检（桩精排·非语义基线·数字不可引用）'
+      : ('M4 · BM25（标题×' + TITLE_REP + '）+ Rerank[' + gateTag + ']');
+    const meta = {
+      label, mode: 'bm25-rerank', stem: STEM, dict: '', expand_weight: null, title_weight: TITLE_REP,
+      root: ROOT, chunk_lines: CHUNK_LINES, top_n: TOPN, ks: KS, excludes: EXCLUDES,
+      rerank: {
+        endpoint: RERANK_ENDPOINT || '(stub)', model: RERANK_MODEL,
+        candidates: RERANK_CANDIDATES, doc_chars: RERANK_DOC_CHARS, concurrency: RERANK_CONCURRENCY,
+        gates: parseRerankGates(RERANK_GATE), lowconf_score: RERANK_LOWCONF_SCORE,
+        stub: RERANK_STUB, not_a_baseline: NON_BASELINE, stats: rr.stats, decisions: rr.decisions,
+      },
+      corpus: {
+        md_files: new Set(built.docs.map(d => d.path)).size, chunks: built.docs.length, vocab: idx.df.size,
+        bytes: built.totalBytes, lines: built.totalLines, read_failures: built.failed.length,
+        sidecar_index: sidecarMeta(built),
+      },
+      note: 'bm25-rerank 非默认；公平对照请用同 title-weight 的 mode=bm25。端点未配置时不产数字。',
+      baseline_contrast: 'mode=bm25 --title-weight ' + TITLE_REP,
+    };
+    const md = toMarkdown(meta, res);
+    if (WRITE_MD) fs.writeFileSync(WRITE_MD, md);
+    console.log(JSON.stringify({ ...meta, ...res.summary, per_query: res.perQuery, markdown: WRITE_MD ? '(written to ' + WRITE_MD + ')' : md }, null, 2));
+  })().catch(e => { console.error('bm25-rerank 运行失败: ' + (e && e.stack || e)); process.exit(3); });
+} else if (MODE === 'hybrid') {
   if (!QJSON) { console.error('需要 --queries-json <path>（或用 --selftest）'); process.exit(1); }
   if (!EMBED_ENDPOINT) {
     console.log(JSON.stringify({
