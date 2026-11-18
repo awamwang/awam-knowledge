@@ -7,6 +7,9 @@
  * 端点（除 /health 外都要求 Authorization: Bearer <KM_SERVICE_TOKEN>，常量时间比较）：
  *   GET  /health           探活（无敏感字段，不鉴权）
  *   POST /search           BM25 内容检索（复用 bm25-index.js 增量缓存）+ 引用提取
+ *                          body.dedup === 'file' → 按文件去重（每文件取最高分 chunk，再 topk）
+ *                          响应含 root（索引根绝对路径）与 index.root
+ *   POST /doc              读取索引根下文档全文（路径边界防护：拒 .. 穿越 / 2MiB 上限）
  *   POST /vault/status     代理 agent_secret.py status（窗口元数据，无值）
  *   POST /vault/reveal     代理 agent_secret.py resolve（人机通道，唯一明文响应体）
  *   POST /vault/unlock     代理 unlock --yes（body.confirm !== true → 400）
@@ -28,6 +31,7 @@
  */
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const cp = require('child_process');
@@ -39,6 +43,8 @@ const BODY_LIMIT = 1024 * 1024;        // 请求体上限 1MB
 const VAULT_TIMEOUT_MS = 10000;        // 人机通道子进程超时
 const DEFAULT_TOPK = 12;
 const MAX_TOPK = 50;
+const DOC_MAX_BYTES = 2 * 1024 * 1024;  // /doc 单文档上限 2MiB
+const DEDUP_FETCH_MULTIPLIER = 5;       // dedup=file 时先取 topk*5 个 chunk 再按文件去重
 
 // ---------- 引用提取 ----------
 // 引用形态（脱敏镜像回填后）：`见保险库：<条目名> [vault:<label>:<hash8>]`
@@ -299,6 +305,7 @@ function createApp(cfg) {
     Promise.resolve()
       .then(async () => {
         if (req.method === 'POST' && p === '/search') return handleSearch(req, res);
+        if (req.method === 'POST' && p === '/doc') return handleDoc(req, res);
         if (req.method === 'POST' && p === '/vault/status') return handleVaultStatus(req, res);
         if (req.method === 'POST' && p === '/vault/reveal') return handleVaultReveal(req, res);
         if (req.method === 'POST' && p === '/vault/unlock') return handleVaultUnlock(req, res);
@@ -316,11 +323,25 @@ function createApp(cfg) {
       const b = await readBody(req);
       if (b.error) { accessLog(req, send(res, b.error === 'body_too_large' ? 413 : 400, { code: b.error })); return; }
       const q = String((b.json && b.json.query) || '').trim();
-      if (!q) { accessLog(req, send(res, 200, { hits: [], mode: 'bm25-title4', total: 0 })); return; }
+      if (!q) { accessLog(req, send(res, 200, { hits: [], mode: 'bm25-title4', total: 0, root: index.rootInfo().root })); return; }
       const topk = Math.max(1, Math.min(Number((b.json && b.json.topk) || DEFAULT_TOPK) || DEFAULT_TOPK, MAX_TOPK));
       const snippetWidth = Math.max(40, Math.min(Number((b.json && b.json.snippetWidth) || 160) || 160, 500));
-      const r = index.search(q, topk, snippetWidth);
+      const dedupFile = !!(b.json && b.json.dedup === 'file');
+      // dedup=file：先多取 chunk，再按文件分组取最高分，凑满 topk 个不同文件
+      const fetchTopk = dedupFile ? Math.max(topk * DEDUP_FETCH_MULTIPLIER, topk) : topk;
+      const r = index.search(q, fetchTopk, snippetWidth);
       if (r.error) { accessLog(req, send(res, 503, { code: r.error, reason: r.reason })); return; }
+      if (dedupFile) {
+        const seenFiles = new Set();
+        const deduped = [];
+        for (const h of r.hits) {
+          if (seenFiles.has(h.path)) continue;
+          seenFiles.add(h.path);
+          deduped.push(h);
+          if (deduped.length >= topk) break;
+        }
+        r.hits = deduped;
+      }
       // 跨块去重：响应级 refs（同 key 保留 display 最长者），供 UI 渲染密钥行
       const seen = new Map();
       for (const h of r.hits) {
@@ -335,7 +356,43 @@ function createApp(cfg) {
         mode: 'bm25-title4',
         total: r.hits.length,
         index: r.index,
+        root: r.index ? r.index.root : null,
+        dedup: dedupFile ? 'file' : undefined,
       }));
+    }
+
+    async function handleDoc(req, res) {
+      const b = await readBody(req);
+      if (b.error) { accessLog(req, send(res, b.error === 'body_too_large' ? 413 : 400, { code: b.error })); return; }
+      const rel = String((b.json && b.json.path) || '').trim();
+      if (!rel || rel.includes('\0')) {
+        accessLog(req, send(res, 400, { code: 'invalid_path', reason: 'path 必须是索引根内的相对路径' }));
+        return;
+      }
+      const root = index.rootInfo().root;
+      if (!root) { accessLog(req, send(res, 503, { code: 'index_root_not_configured' })); return; }
+      const rootAbs = path.resolve(root);
+      const abs = path.resolve(rootAbs, rel);
+      const relNorm = path.relative(rootAbs, abs);
+      // 边界防护：解析后必须仍在索引根内（拒 .. 穿越 / 绝对路径 / 跨盘）
+      if (!relNorm || relNorm.startsWith('..') || path.isAbsolute(relNorm)) {
+        accessLog(req, send(res, 400, { code: 'invalid_path', reason: 'path 越出索引根' }));
+        return;
+      }
+      let st = null;
+      try { st = fs.statSync(abs); } catch (e) { st = null; }
+      if (!st || !st.isFile()) {
+        accessLog(req, send(res, 404, { code: 'doc_not_found' }));
+        return;
+      }
+      if (st.size > DOC_MAX_BYTES) {
+        accessLog(req, send(res, 413, { code: 'doc_too_large', reason: '文档超过 2MiB 上限' }));
+        return;
+      }
+      let content;
+      try { content = fs.readFileSync(abs, 'utf8'); }
+      catch (e) { accessLog(req, send(res, 500, { code: 'doc_read_failed', reason: String(e && e.message) })); return; }
+      accessLog(req, send(res, 200, { ok: true, path: rel, root: rootAbs, content }));
     }
 
     async function handleVaultStatus(req, res) {
@@ -434,6 +491,10 @@ async function selftest() {
     '# 日常',
     '今天研究了 BM25 检索与标题加权。',
   ].join('\n'), 'utf8');
+  // 多块文档（chunkLines=20 → 60 行出 3+ 块），供 dedup=file 用例
+  const multiLines = ['# 多块文档'];
+  for (let i = 1; i <= 60; i++) multiLines.push('uniquekeyword 第' + i + '行内容足够长以区分不同块');
+  fs.writeFileSync(path.join(idxRoot, 'multi.md'), multiLines.join('\n'), 'utf8');
 
   const cfg = loadConfig({
     KM_SERVICE_TOKEN: 'selftest-token-123',
@@ -482,6 +543,35 @@ async function selftest() {
 
     r = await req(port, 'POST', '/search', { query: 'BM25', topk: 999 }, cfg.token);
     ok(r.status === 200, '/search topk 夹取不报错');
+
+    // ---- /search dedup=file ----
+    r = await req(port, 'POST', '/search', { query: 'uniquekeyword' }, cfg.token);
+    ok(r.status === 200 && r.json.hits.length > 1 && r.json.hits.every(h => h.path === 'multi.md'),
+      '/search 无 dedup：同文件多块各占一行');
+    r = await req(port, 'POST', '/search', { query: 'uniquekeyword', dedup: 'file', topk: 5 }, cfg.token);
+    ok(r.status === 200 && r.json.hits.length === 1 && r.json.hits[0].path === 'multi.md',
+      '/search dedup=file：同文件多块去重为单行');
+    ok(r.json.dedup === 'file' && typeof r.json.root === 'string' && r.json.index.root === r.json.root,
+      '/search dedup=file 响应带 root');
+    r = await req(port, 'POST', '/search', { query: 'uniquekeyword', dedup: 'other' }, cfg.token);
+    ok(r.status === 200 && !('dedup' in r.json), '/search 未知 dedup 值忽略');
+
+    // ---- /doc ----
+    r = await req(port, 'POST', '/doc', { path: 'accounts.md' });
+    ok(r.status === 401, '/doc 无 token → 401');
+    r = await req(port, 'POST', '/doc', { path: 'accounts.md' }, cfg.token);
+    ok(r.status === 200 && r.json.ok === true && r.json.content.includes('账号笔记') && r.json.root === path.resolve(idxRoot),
+      '/doc 读取全文 + 返回索引根');
+    r = await req(port, 'POST', '/doc', { path: 'nope.md' }, cfg.token);
+    ok(r.status === 404 && r.json.code === 'doc_not_found', '/doc 缺失文件 → 404 doc_not_found');
+    r = await req(port, 'POST', '/doc', { path: '../escape.md' }, cfg.token);
+    ok(r.status === 400 && r.json.code === 'invalid_path', '/doc .. 穿越 → 400 invalid_path');
+    r = await req(port, 'POST', '/doc', { path: path.resolve(tmp, 'outside.md') }, cfg.token);
+    ok(r.status === 400 && r.json.code === 'invalid_path', '/doc 绝对路径 → 400 invalid_path');
+    r = await req(port, 'POST', '/doc', { path: '' }, cfg.token);
+    ok(r.status === 400 && r.json.code === 'invalid_path', '/doc 空路径 → 400 invalid_path');
+    r = await req(port, 'POST', '/doc', {}, cfg.token);
+    ok(r.status === 400 && r.json.code === 'invalid_path', '/doc 缺 path → 400 invalid_path');
 
     r = await req(port, 'POST', '/vault/status', {}, cfg.token);
     ok(r.status === 503 && r.json.code === 'vault_not_configured', '/vault/status 未配置 → 503');

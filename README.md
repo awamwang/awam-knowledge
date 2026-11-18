@@ -81,13 +81,15 @@ node code/eval-recall.js --mode bm25-rerank --title-weight 4 --rerank-endpoint "
 
 ## HTTP 服务（AFM 集成）
 
-`code/http-server.js` 是面向**本机 UI**（AFM 搜索面板）的常驻 HTTP 服务（默认 `127.0.0.1:18790`，契约见
+`code/http-server.js` 是面向**本机 UI**（AFM 搜索面板 + 知识页）的常驻 HTTP 服务（默认 `127.0.0.1:18790`，契约见
 `design/afm-http-service-design.md`）：`GET /health` 探活 + `POST /search`（BM25 内容检索，命中块做
-「见保险库 / [REDACTED:]」引用提取）+ `POST /vault/status|reveal|unlock|lock`（代理脱敏体系
+「见保险库 / [REDACTED:]」引用提取；`dedup:"file"` 时按文件去重出单行，响应附 `root` 索引根）+
+`POST /doc`（读取索引根下文档全文供知识页渲染：服务端强制路径边界拒 `..` 穿越、2MiB 上限）+
+`POST /vault/status|reveal|unlock|lock`（代理脱敏体系
 `agent_secret.py` 人机通道，ADR-002）。除 `/health` 外全部 `Bearer KM_SERVICE_TOKEN` 鉴权（常量时间比较），
 `KM_SERVICE_TOKEN` 未设置启动即退出（码 2）。明文只出现在 `/vault/reveal` 响应体（`Cache-Control: no-store`），
 不写日志、不进缓存；访问日志只有「方法+路径+状态码」。与 MCP server 进程/端口/鉴权独立，共享 `bm25-index.js`
-与索引根约定；`npm run http` 启动，`node code/http-server.js --selftest` 自检（17 项）。
+与索引根约定；`npm run http` 启动，`node code/http-server.js --selftest` 自检（28 项）。
 
 密钥来源集中在 `code/secret-provider.js`（`AWAM_SECRET` → `AWAM_SECRET_CMD` → `secret.key`，长度不足 16 一律报错），
 签发端 `companion.js` 与校验端 `mcp-server.js` 共用同一解析。命令继承进程环境，因此 Bitwarden 的 `BW_SESSION` 直接透传：
