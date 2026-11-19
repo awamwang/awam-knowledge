@@ -7,8 +7,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
-  # M1：bm25 内核零外部依赖（仅 stdlib）。http/mcp 在 M2 追加（mcp>=2,<3, uvicorn, starlette）。
+  # M1：bm25 内核零外部依赖（仅 stdlib）。http 服务亦仅 stdlib（http.server）。
 ]
+
+[project.scripts]
+awam-knowledge = "awam_knowledge.http_service:main"
 
 [build-system]
 requires = ["setuptools>=68"]
