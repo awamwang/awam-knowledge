@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+[project]
+name = "awam-knowledge"
+version = "0.1.0"
+description = "本地 Markdown 知识库脱敏 / 召回 / 评测 / MCP（Python 版，移植自 Node；脱敏管道来自 knowledge-desensitization 融合）"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  # M1：bm25 内核零外部依赖（仅 stdlib）。http/mcp 在 M2 追加（mcp>=2,<3, uvicorn, starlette）。
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
