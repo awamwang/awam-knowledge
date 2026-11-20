@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+# gitleaks 配置：消解 generic-api-key 对测试占位符的误报（值即字面 REDACTED / 假 key，非真实凭据）。
+[extend]
+useDefault = true
+
+[allowlist]
+description = "false positives: 自检脚本里的占位密钥"
+paths = [
+  # Node 自检脚本用字面量占位（如 SECRET = 'REDACTED'），非真实凭据
+  '''code/mcp-selftest\.js''',
+]
