@@ -69,8 +69,28 @@ def check_index_root() -> None:
     print("  ok index_root")
 
 
+def check_pid_alive() -> None:
+    import subprocess
+    import sys
+    import time as _t
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        deadline = _t.time() + 10
+        while fs_util.pid_alive(child.pid) is not True:
+            assert _t.time() < deadline, "子进程启动后 pid_alive 应为 True"
+            _t.sleep(0.05)
+        child.kill()
+        child.wait(timeout=10)
+        # 进程已终止但 Popen 句柄仍被本进程持有：Windows 上必须判死（GetExitCodeProcess 口径）
+        assert fs_util.pid_alive(child.pid) is False, "已终止（句柄未释放）的进程 pid_alive 应为 False"
+    finally:
+        child.poll()
+    print("  ok pid_alive")
+
+
 if __name__ == "__main__":
     check_fs_util()
     check_store()
     check_index_root()
+    check_pid_alive()
     print("STORAGE CHECK OK")

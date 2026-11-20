@@ -6,6 +6,7 @@ import errno
 import json
 import os
 import secrets
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -78,6 +79,23 @@ def pid_alive(pid: Optional[int]) -> bool:
         return False
     if pid == os.getpid():
         return True
+    if sys.platform == "win32":
+        # Windows 的 os.kill(pid, 0) 只探测能否 OpenProcess：进程已被 TerminateProcess 但
+        # 句柄仍被父进程持有时会误报存活（libuv/Node 用 GetExitCodeProcess 判死活，这里对齐）。
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True

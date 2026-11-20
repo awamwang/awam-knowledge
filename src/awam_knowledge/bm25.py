@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+from .fs_util import read_json, write_json_atomic
 
 DEFAULT_CHUNK_LINES = 20
 DEFAULT_TITLE_WEIGHT = 4
@@ -264,3 +267,164 @@ def search(corpus: Dict[str, Any], idx: Dict[str, Any], query: str,
             "snippet": snippet_of(d["text"], terms, opts.get("snippetWidth")),
         })
     return results
+
+
+# ---------------- 带缓存的语料构建（逐字移植 Node buildCorpusCached） ----------------
+
+CACHE_VERSION = 2
+
+
+def _same_settings(a: Optional[Dict[str, Any]], b: Optional[Dict[str, Any]]) -> bool:
+    if not a or not b:
+        return False
+    return (a.get("chunkLines") == b.get("chunkLines") and a.get("titleWeight") == b.get("titleWeight")
+            and bool(a.get("stem")) == bool(b.get("stem")) and str(a.get("excludes")) == str(b.get("excludes")))
+
+
+def _encode_docs(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    out = []
+    for d in docs:
+        e: Dict[str, Any] = {"lineStart": d["lineStart"], "lineEnd": d["lineEnd"], "len": d["len"],
+                             "tf": [[k, v] for k, v in d["tf"].items()], "text": d["text"]}
+        if d.get("docType"):
+            e["docType"] = d["docType"]
+        out.append(e)
+    return out
+
+
+def _decode_docs(rel: str, title: str, arr: Any) -> List[Dict[str, Any]]:
+    out = []
+    for d in arr or []:
+        e: Dict[str, Any] = {"path": norm_path(rel), "title": title,
+                             "lineStart": d["lineStart"], "lineEnd": d["lineEnd"], "len": d["len"],
+                             "tf": {k: v for k, v in d["tf"]}, "text": d["text"]}
+        if d.get("docType"):
+            e["docType"] = d["docType"]
+        out.append(e)
+    return out
+
+
+def build_corpus_cached(opts: Dict[str, Any]) -> Dict[str, Any]:
+    """按 (mtime, size, title) 判定文件是否变化，未变则复用 chunk；缓存键含切块/加权参数，
+    参数变了整体重建；删除的文件会从缓存中剔除。与 Node buildCorpusCached 行为一致。"""
+    root = Path(opts["root"])
+    ex = opts.get("excludes")
+    excludes = ex if isinstance(ex, list) else parse_excludes(ex)
+    chunk_lines = int(opts.get("chunkLines") or DEFAULT_CHUNK_LINES)
+    title_weight = DEFAULT_TITLE_WEIGHT if opts.get("titleWeight") is None else int(opts["titleWeight"])
+    stem = bool(opts.get("stem"))
+    settings = {"chunkLines": chunk_lines, "titleWeight": title_weight, "stem": stem,
+                "excludes": ",".join(excludes)}
+    cache_path = opts.get("cachePath")
+    prev = None
+    if cache_path and not opts.get("force"):
+        prev = read_json(cache_path, None)
+    compatible = bool(prev and prev.get("version") == CACHE_VERSION and _same_settings(prev.get("settings"), settings))
+    prev_files: Dict[str, Any] = prev.get("files") if (compatible and prev) else {}
+
+    sidecar = _load_sidecar_index(root)
+    docs: List[Dict[str, Any]] = []
+    failed: List[Dict[str, Any]] = []
+    scanned: List[str] = []
+    skipped: List[str] = []
+    zero_byte: List[str] = []
+    encoding_warn: List[Dict[str, Any]] = []
+    next_files: Dict[str, Any] = {}
+    total_bytes = 0
+    total_lines = 0
+    hits = 0
+    misses = 0
+
+    files: List[Tuple[Path, str, str]] = []
+
+    def walk(dir_path: Path) -> None:
+        try:
+            entries = list(dir_path.iterdir())
+        except OSError as e:
+            failed.append({"path": norm_path(str(dir_path.relative_to(root))), "stage": "readdir",
+                           "error": e.__class__.__name__})
+            return
+        for e in sorted(entries, key=lambda p: p.name):
+            p = dir_path / e.name
+            rel = str(p.relative_to(root))
+            if e.is_dir():
+                if not is_excluded(rel, excludes):
+                    walk(p)
+                else:
+                    skipped.append(norm_path(rel))
+                continue
+            if e.is_file() and _RE_MD.search(e.name):
+                files.append((p, rel, e.name))
+
+    walk(root)
+
+    for p, rel, name in files:
+        rel_n = norm_path(rel)
+        scanned.append(rel)
+        try:
+            st = p.stat()
+        except OSError as e:
+            failed.append({"path": rel_n, "stage": "stat", "error": e.__class__.__name__})
+            continue
+        meta = sidecar["byPath"].get(rel_n) if sidecar and sidecar.get("byPath") else None
+        title = str(meta["title"]) if (meta and meta.get("title")) else _RE_MD.sub("", name)
+        mtime_ms = int(st.st_mtime * 1000)
+        cached = prev_files.get(rel_n)
+        if (cached and cached.get("size") == st.st_size and cached.get("mtime_ms") == mtime_ms
+                and cached.get("title") == title):
+            hits += 1
+            docs.extend(_decode_docs(rel_n, title, cached.get("docs") or []))
+            total_bytes += cached.get("bytes") or 0
+            total_lines += cached.get("lines") or 0
+            if cached.get("zero"):
+                zero_byte.append(rel_n)
+            if cached.get("repl") and cached["repl"] / max(1, cached.get("chars") or 1) > 0.01:
+                encoding_warn.append({"path": rel_n, "replacement_chars": cached["repl"], "bytes": cached["size"]})
+            next_files[rel_n] = cached
+            continue
+
+        misses += 1
+        try:
+            data = p.read_bytes()
+            raw = data.decode("utf-8", errors="replace")
+        except OSError as err:
+            failed.append({"path": rel_n, "stage": "read", "error": err.__class__.__name__})
+            continue
+        repl = raw.count("\ufffd")
+        lines = _RE_SPLIT_NL.split(raw)
+        file_docs: List[Dict[str, Any]] = []
+        s = 0
+        while s < len(lines):
+            d = _make_doc(rel, title, lines, s, chunk_lines, title_weight, stem)
+            if d:
+                if meta and meta.get("type"):
+                    d["docType"] = meta["type"]
+                file_docs.append(d)
+            s += chunk_lines
+        docs.extend(file_docs)
+        total_bytes += len(data)
+        total_lines += len(lines)
+        if len(data) == 0:
+            zero_byte.append(rel_n)
+        if len(raw) and repl / len(raw) > 0.01:
+            encoding_warn.append({"path": rel_n, "replacement_chars": repl, "bytes": len(data)})
+        next_files[rel_n] = {
+            "mtime_ms": mtime_ms, "size": st.st_size, "title": title, "bytes": len(data),
+            "lines": len(lines), "zero": len(data) == 0, "repl": repl, "chars": len(raw),
+            "docs": _encode_docs(file_docs),
+        }
+
+    removed = sum(1 for rel in prev_files if rel not in next_files)
+    saved = False
+    if cache_path and (misses > 0 or removed > 0 or not compatible):
+        write_json_atomic(cache_path, {
+            "version": CACHE_VERSION, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "settings": settings, "files": next_files,
+        })
+        saved = True
+
+    return {"docs": docs, "failed": failed, "scanned": scanned, "skipped": skipped,
+            "zeroByte": zero_byte, "encodingWarn": encoding_warn, "totalBytes": total_bytes,
+            "totalLines": total_lines, "sidecar": sidecar,
+            "cache": {"enabled": bool(cache_path), "hits": hits, "misses": misses,
+                      "removed": removed, "saved": saved, "compatible": compatible}}
