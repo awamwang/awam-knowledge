@@ -1,0 +1,40 @@
+{
+  "//": "字面量层（L0）示例。复制为 config/literals.json 后填入真实值（该文件已 gitignore，不入库）。",
+  "//1": "本文件里的值全是「演示用假值」，可以安全入库、可做 code review。",
+  "//2": "三种 match 模式：context（关键词行内命中）/ literal（全文命中，要求 base 长度>=8）/ pair（组合型，见下）。",
+  "items": [
+    {
+      "id": "common-pw-demo",
+      "label": "pw",
+      "enabled": true,
+      "credential": true,
+      "match": "context",
+      "//": "常用密码：base 前后可有前缀/后缀变体；仅在同一行出现关键词时生效。",
+      "base": "abc",
+      "prefixes": ["", "Abc", "ABC"],
+      "suffixes": ["", "123", "!", "2024", "@", "888"],
+      "keywords": ["密码", "口令", "密保", "password", "passwd", "pwd"],
+      "separator": "\\s*[:：=＝]?\\s*",
+      "whole_word": true,
+      "note": "演示：常见弱口令 abc / abc123 / Abc@2024 …"
+    },
+    {
+      "id": "pair-demo",
+      "label": "pw",
+      "enabled": false,
+      "credential": true,
+      "match": "pair",
+      "//": "组合型密码：A、B 两个固定片段。密码可能是单独 A、单独 B，或 A…B / B…A（中间可夹任意字符）。",
+      "//1": "把 A、B 换成你的两个常见字符串；parts 按出现概率从高到低排。演示值 abc/xyz 仅为示意。",
+      "parts": ["abc", "xyz"],
+      "orders": "both",
+      "wclass": "[A-Za-z0-9!@#$%^&*_\\-+/.=@]",
+      "pad": 32,
+      "single": true,
+      "whole_word": true,
+      "keywords": ["密码", "口令", "密保", "password", "passwd", "pwd"],
+      "separator": "\\s*[:：=＝]?\\s*",
+      "note": "演示：密码含 abc、xyz 两片段（任意顺序）或二者单独出现"
+    }
+  ]
+}

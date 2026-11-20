@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "_README": [
+    "白名单：列出「确认不是秘密」的值的指纹，管线会跳过它们，不再替换。",
+    "文件里只存 sha256(值)[:8]，不含明文，因此本文件可以入库。",
+    "用法：",
+    "  python scripts/whitelist.py add \"要排除的字符串\"     # 按值添加（自动算指纹）",
+    "  python scripts/whitelist.py add --fp 1a2b3c4d       # 按报告里的指纹添加",
+    "  python scripts/whitelist.py list                    # 查看当前白名单",
+    "  加完后重跑 sanitize.py 即可生效（白名单在规则加载时自动读取）。",
+    "典型用途：熵兜底把某个版本号/说明串/文档措辞误判成密钥时，把它的指纹加进来。"
+  ],
+  "fingerprints": []
+}

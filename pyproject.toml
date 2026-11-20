@@ -13,6 +13,8 @@ dependencies = [
 [project.scripts]
 awam-knowledge = "awam_knowledge.http_service:main"
 awam-knowledge-mcp = "awam_knowledge.mcp_server:main"
+# M3：脱敏管道统一入口（选择+分发：新增源 → wizard；处理源 → km_pipeline）
+awam-knowledge-entry = "awam_knowledge.entry:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -20,3 +22,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# M3：内置基线配置模板（rules.json / *.example.json）随包分发
+[tool.setuptools.package-data]
+awam_knowledge = ["config/*.json"]

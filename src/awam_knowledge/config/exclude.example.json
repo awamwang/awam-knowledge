@@ -1,0 +1,17 @@
+{
+  "//": "整文件/整目录排除（glob，相对笔记根）。命中即跳过，不脱敏、不进镜像。",
+  "//1": "用途：把「非笔记」内容整体排除，比逐条还原省事；与 credential 类无关。",
+  "//2": "glob 用 fnmatch 语义，** 匹配任意层级；也可写目录名（如 assets）排除其下全部。",
+  "paths": [
+    "assets/**",
+    "assets",
+    ".agent_history/**",
+    ".agent_history",
+    ".office-claw/**",
+    ".office-claw",
+    "docs/**",
+    "docs",
+    ".git/**",
+    ".git"
+  ]
+}

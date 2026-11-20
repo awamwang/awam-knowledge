@@ -104,6 +104,49 @@ export AWAM_SECRET_CMD='bw get password <vault-item>'
 node code/secret-broker-check.js              # 结论：source / length / 两侧同源 / 签验往返
 ```
 
+# M3 · 知识脱敏管道（全量融合，Python 零依赖）
+
+M3 把 knowledge-desensitization 仓的脱敏管道（向导 + 四步）全量融合进本包，stdlib 之外零依赖
+（YAML 用内置 `mini_yaml` 子集实现，load/dump 与 PyYAML 在线上配置上逐字节等价）。
+脱敏仓 `G:\Knowledge\knowledge-desensitization` 保留不动，两仓共用同一份秘密材料。
+
+## 模块（`src/awam_knowledge/`）
+
+| 模块 | 用途 |
+|---|---|
+| `mini_yaml.py` | 零依赖 YAML 子集（load/dump；`--selftest` 40 项） |
+| `km_paths.py` | 路径解析：用户配置根 / 数据根 / 工作副本 / 秘密材料目录（默认秘密根锚 `<KM_CONFIG_HOME>/.km`） |
+| `km_config.py` | 两级配置（settings.yaml + sources/<id>.yaml；`--selftest` 26 项） |
+| `sanitize_lib.py` | 脱敏内核：稳定 token、四层召回、路径排除、白名单指纹、配置分层（`--selftest` 42 项） |
+| `km_sync.py` | ① 真源 → 工作副本增量同步（源只读；删除软移） |
+| `km_sanitize.py` | ② 就地脱敏（稳定 token、幂等、可逆；原文只进 vault/） |
+| `km_materials.py` | ③ 还原材料落盘「单独备份目录」（salt/map/literals → 私密离线） |
+| `km_build_index.py` | ④ 旁路 Index（index.json 等；默认不改写 .md） |
+| `wizard.py` | 配置向导：`--source <真源目录>` 逐步建立配置与目录 |
+| `km_pipeline.py` | 全流程编排（进程内调用各步 main(argv)，不再 subprocess） |
+| `entry.py` | 统一入口：选择 + 分发（新增源 → wizard；处理源 → km_pipeline） |
+
+内置基线配置随包分发（`config/rules.json` 等），配置分层：内置模板 → 全局
+`<KM_CONFIG_HOME>/config/` → 每源 `<秘密材料根>/<id>/config/`（后者覆盖前者，改全局即生效）。
+
+## 用法
+
+```bash
+python -m awam_knowledge.entry --list                          # 列出已保存的源
+python -m awam_knowledge.entry --source <真源> --data-root <根>  # 新增/配置一个源（→ wizard）
+python -m awam_knowledge.entry --id <源id> --apply             # 全流程（→ km_pipeline）
+python -m awam_knowledge.km_pipeline --id <源id> --apply       # sync→sanitize→materials→build_index
+```
+
+端到端沙箱自检（临时 KM_CONFIG_HOME，不碰真实配置/真源/秘密材料）：
+
+```bash
+PYTHONPATH=src python tests/km_check.py   # 37 项：wizard→sync→sanitize→materials→build_index→pipeline 全链
+```
+
+安全口径不变：真源只读；秘密材料（salt/map/literals）永不进 Git、永不上云；
+工作副本（已脱敏）才可入向量库 / 网盘 / 私有 Git。
+
 ## 自检
 
 ```bash
@@ -121,6 +164,10 @@ PYTHONPATH=src python -m awam_knowledge.import_md_dir --selftest   # 导入 31 �
 PYTHONPATH=src python -m awam_knowledge.eval_recall --selftest     # 评测核心
 PYTHONPATH=src python tests/mcp_selftest.py          # MCP 60 项（stdio 真实进程）
 PYTHONPATH=src python tests/parity_recall.py         # 全语料召回回归 Node↔Python 对账
+PYTHONPATH=src python -m awam_knowledge.mini_yaml --selftest    # YAML 子集 40 项
+PYTHONPATH=src python -m awam_knowledge.km_config --selftest    # 两级配置 26 项
+PYTHONPATH=src python -m awam_knowledge.sanitize_lib --selftest # 脱敏内核 42 项
+PYTHONPATH=src python tests/km_check.py             # M3 管道端到端 37 项（沙箱）
 ```
 
 自检只用临时语料与临时状态目录，不读私有数据；所有产物写完即删。
@@ -136,6 +183,7 @@ PYTHONPATH=src python tests/parity_recall.py         # 全语料召回回归 Nod
 | `eval_recall.py` | 召回评测 bm25 模式核心（联网模式仍用 `code/eval-recall.js`；`--selftest`） |
 | `mcp_server.py` | MCP stdio server 9 工具（零依赖手写 JSON-RPC，行为与 js 版等价） |
 | `secret_provider.py` | 密钥三级来源解析（与 `code/secret-provider.js` 同源语义） |
+| M3 管道模块 | `mini_yaml / km_paths / km_config / sanitize_lib / km_sync / km_sanitize / km_materials / km_build_index / wizard / km_pipeline / entry`（见上文 M3 节） |
 
 ## 脚本一览（Node 原版）
 
