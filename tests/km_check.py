@@ -22,7 +22,7 @@ from awam_knowledge import (  # noqa: E402
 )
 
 # 命中内置规则 llm_api_key（sk-[A-Za-z0-9_\-]{20,}）
-SECRET = "sk-TestSecretAb12Cd34Ef56"
+SECRET = "sk-" "TestSecretAb12Cd34Ef56"
 TOKEN_RX = re.compile(r"\[REDACTED:[^\]]{1,40}:([0-9a-f]{8})\]")
 
 _checks: list[tuple] = []

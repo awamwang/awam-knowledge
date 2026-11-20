@@ -6,6 +6,9 @@ build/
 dist/
 # 运行期秘密/工作数据（永不入库；与脱敏仓隐私边界一致）
 .km/
+# 例外：parity 用一条受控 fixture 验证 .km/ 排除逻辑（非秘密，故意纳入版本库）
+!tests/parity/fixture/.km/
+!tests/parity/fixture/.km/skip.md
 .tmp/
 vault/
 literals.json

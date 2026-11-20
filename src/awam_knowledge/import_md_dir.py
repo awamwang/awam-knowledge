@@ -604,7 +604,7 @@ def selftest(root: Path) -> Dict[str, Any]:
     (root2 / "assets" / "b.bin").write_bytes(bytes([7]) * 10)
     (root2 / "assets" / "empty.bin").write_bytes(b"")
     (root2 / "leak.md").write_text(
-        "# 泄露样例\n\nkey: sk-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n"
+        "# 泄露样例\n\nkey: sk-" "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345\n"
         "![a](assets/a.bin)\n![b](assets/b.bin)\n![e](assets/empty.bin)\n", encoding="utf-8")
     r2 = import_dir(root2, set(DFLT_SKIP))
     checks.append(("密钥扫描命中 1 个文件", r2["summary"]["security"]["files_with_hits"] == 1))

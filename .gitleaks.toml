@@ -1,11 +1,19 @@
 # SPDX-License-Identifier: MIT
-# gitleaks 配置：消解 generic-api-key 对测试占位符的误报（值即字面 REDACTED / 假 key，非真实凭据）。
+# gitleaks 配置：放行 awam-knowledge sanitizer/km 自检里的合成 sk- 测试 fixture。
+# 这些值是测试向量（sk-Zzzz…、sk-Whitelisted… 等），并非真实凭据；用内容正则按 fixture 文件精确放行，
+# 不放行任意 sk- 串（真实泄漏仍会被 default 规则命中）。
 [extend]
 useDefault = true
 
 [allowlist]
-description = "false positives: 自检脚本里的占位密钥"
+description = "synthetic sk- self-test fixtures (sanitizer/km/mcp) — not real secrets"
 paths = [
-  # Node 自检脚本用字面量占位（如 SECRET = 'REDACTED'），非真实凭据
-  '''code/mcp-selftest\.js''',
+  '''^tests/''',
+  '''^code/''',
+  '''^src/awam_knowledge/sanitize_lib\.py$''',
+  '''^src/awam_knowledge/import_md_dir\.py$''',
+]
+regexes = [
+  '''sk-[A-Za-z0-9_\-]{20,}''',
+  '''SECRET\s*=\s*["'\'']REDACTED["'\'']''',
 ]

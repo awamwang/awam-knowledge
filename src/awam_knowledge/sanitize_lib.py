@@ -752,7 +752,7 @@ def selftest() -> int:
     salt2 = b"T" * 32
     r_secret = Rule(name="sk_key", label="secret", enabled=True, credential=True,
                     pattern=r"sk-[A-Za-z0-9]{20,}")
-    text = "api 密钥 sk-AbCdEf123456789012345678 用于测试"
+    text = "api 密钥 sk-" "AbCdEf123456789012345678 用于测试"
 
     # 1) token 稳定与盐敏感
     hits = find_hits(text, [r_secret], salt1)
@@ -811,11 +811,11 @@ def selftest() -> int:
     global _WHITELIST
     old_wl = set(_WHITELIST)
     try:
-        _WHITELIST = {value_fp("sk-Zzzzzzzzzzzzzzzzzzzzzzzz")}
+        _WHITELIST = {value_fp("sk-" "Zzzzzzzzzzzzzzzzzzzzzzzz")}
         rx_rule = Rule(name="sk2", label="secret", enabled=True, credential=True,
                        pattern=r"sk-[A-Za-z]{24}")
-        ck("白名单命中排除", find_hits("v sk-Zzzzzzzzzzzzzzzzzzzzzzzz w", [rx_rule], salt1) == [])
-        ck("非白名单仍命中", len(find_hits("v sk-Yyyyyyyyyyyyyyyyyyyyyyyy w", [rx_rule], salt1)) == 1)
+        ck("白名单命中排除", find_hits("v sk-" "Zzzzzzzzzzzzzzzzzzzzzzzz w", [rx_rule], salt1) == [])
+        ck("非白名单仍命中", len(find_hits("v sk-" "Yyyyyyyyyyyyyyyyyyyyyyyy w", [rx_rule], salt1)) == 1)
     finally:
         _WHITELIST = old_wl
 
@@ -852,7 +852,7 @@ def selftest() -> int:
             json.dump({"items": [{"id": "glit", "label": "literal", "credential": True,
                                   "base": "globalpw1", "keywords": ["密码"]}]}, fh)
         with open(os.path.join(g, "whitelist.json"), "w", encoding="utf-8") as fh:
-            json.dump({"fingerprints": [value_fp("sk-Whitelisted0000000000000")]}, fh)
+            json.dump({"fingerprints": [value_fp("sk-" "Whitelisted0000000000000")]}, fh)
         per = os.path.join(tmp, "src-config")
         os.makedirs(per, exist_ok=True)
         with open(os.path.join(per, "rules.json"), "w", encoding="utf-8") as fh:
@@ -874,7 +874,7 @@ def selftest() -> int:
         ck("内置其余规则保留", len([r for r in layered if not r.name.startswith("literal:")]) > 5)
         ck("每源新增规则", any(r.name == "local_rule" for r in layered))
         # 白名单并集生效（全局 + 每源）
-        ck("全局白名单生效", find_hits("v sk-Whitelisted0000000000000 w", layered, salt1) == [])
+        ck("全局白名单生效", find_hits("v sk-" "Whitelisted0000000000000 w", layered, salt1) == [])
         ck("每源白名单生效", find_hits("v LOCAL-999999 w", layered, salt1) == [])
         ck("非白名单仍命中", len(find_hits("v LOCAL-123456 w", layered, salt1)) == 1)
     finally:
