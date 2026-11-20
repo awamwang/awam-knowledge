@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 awam-knowledge = "awam_knowledge.http_service:main"
+awam-knowledge-mcp = "awam_knowledge.mcp_server:main"
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -61,7 +61,11 @@ node code/eval-recall.js --mode bm25-rerank --title-weight 4 --rerank-endpoint "
 
 ## MCP server
 
-`code/mcp-server.js` 是手写 JSON-RPC 2.0 的 stdio server（9 个工具）：
+**Python 主干**：`src/awam_knowledge/mcp_server.py`（console script `awam-knowledge-mcp`，或
+`python -m awam_knowledge.mcp_server`）与 `code/mcp-server.js` 协议/行为逐字等价（手写
+JSON-RPC 2.0，零依赖；等价性由 `tests/mcp_selftest.py` 60 项断言钉死）。以下为共同契约：
+
+`mcp-server` 是手写 JSON-RPC 2.0 的 stdio server（9 个工具）：
 
 - `search`：本地 BM25（标题×4）；索引根取 `AWAM_INDEX_ROOT` → `KM_DATA_ROOT/<KM_SOURCE_ID>` → `settings.yaml`；带增量缓存（按 size/mtime 复用 chunk）
 - `propose_write` / `commit_write` / `undo_write`：两阶段写入闸（HMAC 一次性 token + 基线 hash + TTL）；提案与已用 token 持久化，重启后仍拒重放；提交与撤销均原子写；目标路径限定在写入根内
@@ -107,9 +111,33 @@ npm run selftest   # 10 个脚本：eval 23、infra 38、secret 18、mcp 60、im
                    # scan-links 16、prepare 9、query-set 6、spike 23、http-server 17
 ```
 
+Python 主干自检（与上表同口径）：
+
+```bash
+PYTHONPATH=src python tests/parity/check_parity.py   # bm25 内核 Node↔Python 等价
+PYTHONPATH=src python tests/storage_check.py         # fs_util/store/index_root
+PYTHONPATH=src python tests/http_selftest.py         # http_service 28 项（AFM 契约）
+PYTHONPATH=src python -m awam_knowledge.import_md_dir --selftest   # 导入 31 项
+PYTHONPATH=src python -m awam_knowledge.eval_recall --selftest     # 评测核心
+PYTHONPATH=src python tests/mcp_selftest.py          # MCP 60 项（stdio 真实进程）
+PYTHONPATH=src python tests/parity_recall.py         # 全语料召回回归 Node↔Python 对账
+```
+
 自检只用临时语料与临时状态目录，不读私有数据；所有产物写完即删。
 
-## 脚本一览
+## Python 模块（主干，`src/awam_knowledge/`）
+
+| 模块 | 用途 |
+|---|---|
+| `bm25.py` | 共享检索核心（分词、切块、BM25、搜索、增量缓存 `build_corpus_cached`） |
+| `fs_util.py` / `store.py` / `index_root.py` | 原子写与目录锁；job / token / undo 状态库；独立审计；索引根解析 |
+| `http_service.py` | AFM 集成常驻 HTTP 服务（`/health /search /doc /vault/*`，selftest 28 项） |
+| `import_md_dir.py` | Markdown 目录导入（selftest 31 项；`python -m awam_knowledge.import_md_dir`） |
+| `eval_recall.py` | 召回评测 bm25 模式核心（联网模式仍用 `code/eval-recall.js`；`--selftest`） |
+| `mcp_server.py` | MCP stdio server 9 工具（零依赖手写 JSON-RPC，行为与 js 版等价） |
+| `secret_provider.py` | 密钥三级来源解析（与 `code/secret-provider.js` 同源语义） |
+
+## 脚本一览（Node 原版）
 
 | 脚本 | 用途 |
 |---|---|
