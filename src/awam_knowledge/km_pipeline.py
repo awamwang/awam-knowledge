@@ -129,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
     # 4) 旁路 Index（build_index 用 --dry-run 表示不写；无 --apply 旗标）
     if not args.skip_index:
         a = ["--id", args.id, "--data-root", data_root]
+        bi = cfg.get("build_index") or {}
+        if bi.get("include_dirs"):
+            a += ["--include-dirs", ",".join(str(x) for x in bi["include_dirs"])]
+        if bi.get("skip_dirs"):
+            a += ["--skip-dirs", ",".join(str(x) for x in bi["skip_dirs"])]
         if not args.apply:
             a += ["--dry-run"]
         step("4 索引 build_index", km_build_index, "km_build_index", a)

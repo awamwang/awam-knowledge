@@ -17,7 +17,8 @@ PyYAML 替换为零依赖 mini_yaml（输出风格与 safe_dump 一致，已交�
     tmp_root: <目录>                 # 临时工作区根；缺省 <KM_CONFIG_HOME>/.tmp（用完即弃）
     defaults:
       sync:     { on_deleted: ask, exclude: [".git/**", ".obsidian/**", ...] }
-      sanitize: { include_assets: false, note_dirs: [journals, pages] }
+      sanitize: { include_assets: false, note_dirs: [] }   # note_dirs 空=全量；非空=白名单
+      build_index: { include_dirs: [], skip_dirs: [] }     # 索引扫描白/黑名单（空=全量）
       backup:   { advise: true }
 
 每源 <KM_CONFIG_HOME>/sources/<id>.yaml
@@ -28,6 +29,7 @@ PyYAML 替换为零依赖 mini_yaml（输出风格与 safe_dump 一致，已交�
     work_dir: <可选，覆盖工作副本位置；缺省 <data_root>/<id>>
     sync:     { on_deleted: ask, exclude: [...] }      # 可选，覆盖全局
     sanitize: { include_assets: false, note_dirs: [...] }
+    build_index: { include_dirs: [...], skip_dirs: [...] }
     backup:   { advise: true, private_backup_dir: <可选，覆盖全局> }
     state:    {}                 # 运行态由脚本维护；用户不必手改
 
@@ -67,8 +69,16 @@ DEFAULT_SETTINGS: dict = {
         },
         "sanitize": {
             "include_assets": False,
-            "note_dirs": ["journals", "pages"],
+            # 通用性定稿（2026-11-25）：note_dirs 默认空 = 全量（所有目录按笔记）；
+            # 非空 = 白名单（仅这些目录按笔记，其余 skip）。Logseq 源显式写
+            # note_dirs: [journals, pages] 即回到旧口径。
+            "note_dirs": [],
             "all_text": False,
+        },
+        "build_index": {
+            # 同一定稿：默认全量扫描；include_dirs 白名单 / skip_dirs 黑名单。
+            "include_dirs": [],
+            "skip_dirs": [],
         },
         "backup": {
             "advise": True,
@@ -167,10 +177,11 @@ def resolve_source(sid: str) -> dict:
                               or settings.get("private_backup_dir"),
         "sync": settings["defaults"]["sync"],
         "sanitize": settings["defaults"]["sanitize"],
+        "build_index": settings["defaults"]["build_index"],
         "backup": settings["defaults"]["backup"],
         "state": raw.get("state", {}) or {},
     }
-    for section in ("sync", "sanitize", "backup"):
+    for section in ("sync", "sanitize", "build_index", "backup"):
         if isinstance(raw.get(section), dict):
             base[section] = deep_merge(base[section], raw[section])
     return base
@@ -290,15 +301,16 @@ def selftest() -> int:
         # 默认 settings
         s = load_settings()
         ck("默认 on_deleted=ask", s["defaults"]["sync"]["on_deleted"] == "ask")
-        ck("默认 note_dirs", s["defaults"]["sanitize"]["note_dirs"] == ["journals", "pages"])
+        ck("默认 note_dirs 空=全量", s["defaults"]["sanitize"]["note_dirs"] == [])
         ck("默认 include_assets=False", s["defaults"]["sanitize"]["include_assets"] is False)
+        ck("默认 build_index 白/黑名单空", s["defaults"]["build_index"] == {"include_dirs": [], "skip_dirs": []})
 
         # update_settings 写回 + 覆盖
         update_settings({"data_root": os.path.join(tmp, "d"), "defaults": {"sync": {"on_deleted": "keep"}}})
         s2 = load_settings()
         ck("update_settings 落盘", s2["data_root"] == os.path.join(tmp, "d"))
         ck("update_settings 局部覆盖", s2["defaults"]["sync"]["on_deleted"] == "keep")
-        ck("update_settings 保留其余默认", s2["defaults"]["sanitize"]["note_dirs"] == ["journals", "pages"])
+        ck("update_settings 保留其余默认", s2["defaults"]["sanitize"]["note_dirs"] == [])
         ck("settings.yaml 文件存在", os.path.isfile(paths.settings_path()))
 
         # suggest_*
@@ -321,7 +333,8 @@ def selftest() -> int:
         ck("resolve_source name", c["name"] == "测试")
         ck("resolve_source 每源覆盖 sync", c["sync"]["on_deleted"] == "remove")
         ck("resolve_source 继承全局 exclude", ".git/**" in c["sync"]["exclude"])
-        ck("resolve_source 继承 sanitize", c["sanitize"]["note_dirs"] == ["journals", "pages"])
+        ck("resolve_source 继承 sanitize", c["sanitize"]["note_dirs"] == [])
+        ck("resolve_source 继承 build_index", c["build_index"]["include_dirs"] == [])
         ck("resolve_source data_root 来自 settings", c["data_root"] == os.path.join(tmp, "d"))
         ck("resolve_source state", c["state"]["last_sync"] == "2026-11-20T00:00:00")
         ck("resolve_source work_dir 缺省", c["work_dir"] is None)

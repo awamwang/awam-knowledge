@@ -41,8 +41,6 @@ from .sanitize_lib import (
 )
 from . import km_paths as paths
 
-# 笔记范围：显式白名单目录（docs/ 不纳入，2026-10-18 按用户要求剔除）
-NOTE_DIRS = {"journals", "pages"}
 # 顶层身份/运行时文件，按用户决策排除
 EXCLUDED_ROOT_FILES = {
     "IDENTITY.md", "USER.md", "SOUL.md", "AGENT.md", "AGENTS.md", "HEARTBEAT.md",
@@ -51,14 +49,18 @@ ASSET_DIRS = {"assets"}
 
 
 def classify(rel: str, note_dirs: set[str] | None = None,
-             unknown_as_note: bool = False) -> str:
-    """返回 'note' | 'asset' | 'skip'。
+             unknown_as_note: bool = True) -> str:
+    """返回 'note' | 'asset' | 'skip'。通用性约定（2026-11-25 定稿：默认全量 + 白/黑名单）：
 
-    note_dirs        笔记目录名集合；缺省 NOTE_DIRS（journals/pages）。
-    unknown_as_note  未归类目录是否按笔记处理（非 Logseq 源用 --all-text 打开）。
+    note_dirs  提供且非空 → **白名单模式**：仅白名单目录按笔记处理，其余目录 skip
+               （与 unknown_as_note 无关——白名单是显式收窄）。
+    note_dirs  空/None   → **全量模式**（默认）：所有未命中黑名单
+               （GENERATED_DIRS / RUNTIME_DIRS / EXCLUDED_ROOT_FILES）的目录都按笔记处理，
+               不再默认 journals/pages（Logseq 布局只是普通知识目录之一）。
+    unknown_as_note  兼容参数；全量模式下恒为 note，保留供旧调用方传 False 复现旧行为。
+    黑名单：exclude.json 的 path glob（load_path_excludes）在 classify 之前生效。
     """
-    nd = NOTE_DIRS if note_dirs is None else note_dirs
-    default_kind = "note" if unknown_as_note else "skip"
+    nd = {d for d in (note_dirs or []) if d}
     parts = rel.replace("\\", "/").split("/")
     head = parts[0]
     if len(parts) == 1:
@@ -71,7 +73,9 @@ def classify(rel: str, note_dirs: set[str] | None = None,
         return "note"
     if head in ASSET_DIRS:
         return "asset"
-    return default_kind
+    if nd:
+        return "skip"
+    return "note" if unknown_as_note else "skip"
 
 
 def human_size(n: int) -> str:
@@ -113,9 +117,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--in-place", action="store_true",
                     help="就地脱敏：直接覆写 --root（源即工作副本）；与 --out 同路径时自动启用")
     ap.add_argument("--note-dirs", default=None,
-                    help="笔记目录名（逗号分隔）；缺省 journals,pages。可来自源配置 sanitize.note_dirs")
+                    help="笔记目录白名单（逗号分隔）；提供后仅这些目录按笔记处理。"
+                         "缺省全量（所有目录按笔记）。可来自源配置 sanitize.note_dirs")
     ap.add_argument("--all-text", action="store_true",
-                    help="把所有文本文件都当笔记处理（非 Logseq 源）")
+                    help="（兼容旗标）把 assets/ 文本也当笔记处理；目录范围默认已全量")
     args = ap.parse_args(argv)
 
     root = paths.resolve_data_root(args.data_root)
@@ -151,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             if path_excluded(rel, excludes):
                 n_skip += 1
                 continue
-            kind = classify(rel, note_dirs, unknown_as_note=args.all_text)
+            kind = classify(rel, note_dirs)
             if args.all_text and kind == "asset":
                 kind = "note"
             if kind == "skip":

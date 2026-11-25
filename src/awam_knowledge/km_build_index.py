@@ -51,6 +51,11 @@ SKIP_DIR_NAMES = {
 
 NOTE_EXTS = {".md", ".markdown"}
 
+# 本工具自身的输出产物（根级），全量扫描时不得自吞
+GENERATED_OUTPUT_NAMES = {
+    "index.json", "journal-date-map.json", "block-refs.json", "index-report.md",
+}
+
 
 def ordinal(n: int) -> str:
     if 11 <= n % 100 <= 13:
@@ -144,34 +149,43 @@ def resolve_work_root(args: argparse.Namespace) -> Path:
     return Path(work)
 
 
-def iter_note_files(root: Path):
-    """Yield (abs_path, rel_posix) for md notes under journals/ pages/ (and root md)."""
-    preferred = []
-    for sub in ("journals", "pages"):
-        d = root / sub
-        if d.is_dir():
-            preferred.append(d)
-    # 也扫根下散落 md（不含子目录已覆盖的）
-    search_roots = preferred if preferred else [root]
+def iter_note_files(root: Path, include_dirs: set[str] | None = None,
+                    skip_dirs: set[str] | None = None):
+    """Yield (abs_path, rel_posix) for md notes under root.
+
+    通用性约定（2026-11-25 定稿：默认全量 + 白/黑名单）：
+    - 默认全量：扫整个工作副本根（不再因存在 journals/ 或 pages/ 而只扫这两个目录——
+      那会让恰含 pages/ 的普通 Markdown 知识库静默漏索引）。
+    - include_dirs 提供且非空 → 白名单：只扫这些顶层目录（+ 根下散落 md）。
+    - skip_dirs → 黑名单：目录名并入内置 SKIP_DIR_NAMES（任一路径段命中即跳过）。
+    - journals/ 前缀只影响 journal 类型标注，不影响扫描范围。
+    - 根级生成产物（index-report.md 等）始终排除，避免索引自吞与增量漂移。
+    """
+    inc = {d for d in (include_dirs or []) if d}
+    skip = set(SKIP_DIR_NAMES) | {d for d in (skip_dirs or []) if d}
+
+    def _skipped(parts: tuple[str, ...]) -> bool:
+        return any(p in skip or p.lower() in skip for p in parts)
+
     seen = set()
-    for base in search_roots:
-        for p in sorted(base.rglob("*")):
-            if not p.is_file():
-                continue
-            if p.suffix.lower() not in NOTE_EXTS:
-                continue
-            try:
-                rel = p.relative_to(root)
-            except ValueError:
-                continue
-            parts = rel.parts
-            if should_skip_dir(parts[:-1]):
-                continue
-            key = rel.as_posix()
-            if key in seen:
-                continue
-            seen.add(key)
-            yield p, key
+    for p in sorted(root.rglob("*")):
+        if not p.is_file():
+            continue
+        if p.suffix.lower() not in NOTE_EXTS:
+            continue
+        rel = p.relative_to(root)
+        parts = rel.parts
+        if len(parts) == 1 and p.name in GENERATED_OUTPUT_NAMES:
+            continue
+        if inc and len(parts) > 1 and parts[0] not in inc:
+            continue
+        if _skipped(parts[:-1]):
+            continue
+        key = rel.as_posix()
+        if key in seen:
+            continue
+        seen.add(key)
+        yield p, key
 
 
 def extract_assets(text: str, asset_names: set[str]) -> list[str]:
@@ -191,7 +205,9 @@ def extract_assets(text: str, asset_names: set[str]) -> list[str]:
     return sorted(set(found))
 
 
-def build(root: Path, write_frontmatter: bool, dry_run: bool) -> dict:
+def build(root: Path, write_frontmatter: bool, dry_run: bool,
+          include_dirs: set[str] | None = None,
+          skip_dirs: set[str] | None = None) -> dict:
     asset_dir = root / "assets"
     asset_names = set()
     if asset_dir.is_dir():
@@ -204,7 +220,7 @@ def build(root: Path, write_frontmatter: bool, dry_run: bool) -> dict:
     skipped_decode = 0
     frontmatter_written = 0
 
-    files = list(iter_note_files(root))
+    files = list(iter_note_files(root, include_dirs=include_dirs, skip_dirs=skip_dirs))
 
     # pass 1: titles / aliases（廉价）
     title_set: set[str] = set()
@@ -371,6 +387,12 @@ def main(argv: list[str] | None = None) -> int:
         "--out-dir",
         help="Index 输出目录；缺省 = 工作副本根。须位于工作副本之下。",
     )
+    ap.add_argument("--include-dirs", default=None,
+                    help="扫描白名单（逗号分隔的顶层目录名）；提供后只扫这些目录（+根下散落 md）。"
+                         "缺省全量。可来自源配置 build_index.include_dirs")
+    ap.add_argument("--skip-dirs", default=None,
+                    help="扫描黑名单（逗号分隔的目录名，并入内置跳过表）。"
+                         "可来自源配置 build_index.skip_dirs")
     ap.add_argument("--dry-run", action="store_true", help="只打印统计，不写文件")
     ap.add_argument(
         "--write-frontmatter",
@@ -388,9 +410,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"工作副本不存在: {root}", file=sys.stderr)
         return 2
 
+    # 白/黑名单解析优先级：CLI > 源配置 build_index 段 > 全量默认
+    include_dirs: set[str] = set()
+    skip_dirs: set[str] = set()
+    if args.include_dirs:
+        include_dirs = {x.strip() for x in args.include_dirs.split(",") if x.strip()}
+    elif not args.root and args.id:
+        try:
+            cfg = km_config.resolve_source(args.id)
+            bi = cfg.get("build_index") or {}
+            include_dirs = {x for x in (bi.get("include_dirs") or []) if x}
+        except SystemExit:
+            pass
+    if args.skip_dirs:
+        skip_dirs = {x.strip() for x in args.skip_dirs.split(",") if x.strip()}
+    elif not args.root and args.id:
+        try:
+            cfg = km_config.resolve_source(args.id)
+            bi = cfg.get("build_index") or {}
+            skip_dirs = {x for x in (bi.get("skip_dirs") or []) if x}
+        except SystemExit:
+            pass
+
     out_dir = Path(os.path.abspath(args.out_dir)) if args.out_dir else root
 
-    result = build(root, write_frontmatter=args.write_frontmatter, dry_run=args.dry_run)
+    result = build(root, write_frontmatter=args.write_frontmatter, dry_run=args.dry_run,
+                   include_dirs=include_dirs, skip_dirs=skip_dirs)
     written = write_outputs(
         out_dir, result, dry_run=args.dry_run, with_report=not args.no_report
     )

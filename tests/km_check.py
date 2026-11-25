@@ -137,11 +137,13 @@ def main() -> int:
         ck("备份含 map.json", any(f["path"].endswith("map.json") for f in man["files"]))
         ck("RESTORE.md 落盘", os.path.isfile(os.path.join(backup, sid, "RESTORE.md")))
 
-        # build_index：旁路 Index（不改写 .md）
+        # build_index：旁路 Index（不改写 .md；默认全量扫描，docs/ 虽被脱敏 exclude.json
+        # 排除但文件仍在工作副本中，与 bm25 检索语料口径一致地纳入索引）
         idx_path = os.path.join(work, "index.json")
         ck("index.json 落盘", os.path.isfile(idx_path))
         idx = json.loads(r(idx_path))
-        ck("索引 2 篇", idx["count"] == 2)
+        ck("索引 3 篇（含 docs）", idx["count"] == 3)
+        ck("docs 纳入全量索引", any(d["path"].startswith("docs/") for d in idx["docs"]))
         ck("索引类型齐全", {d["type"] for d in idx["docs"]} == {"journal", "page"})
         ck("日记日期识别", any(d.get("date") == "2026-01-05" for d in idx["docs"]))
 
@@ -163,7 +165,7 @@ def main() -> int:
         ck("增量文件已拷", os.path.isfile(new_j))
         ck("增量文件已脱敏", SECRET + "x" not in r(new_j))
         idx2 = json.loads(r(idx_path))
-        ck("索引随增量更新", idx2["count"] == 3)
+        ck("索引随增量更新", idx2["count"] == 4)
 
         # 7) entry --source → wizard 分发（dry-run + 已存在源需 --force，不写盘）
         rc = run_step(entry.main, [
