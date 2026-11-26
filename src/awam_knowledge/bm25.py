@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -69,13 +70,37 @@ def parse_excludes(value: Optional[Any]) -> List[str]:
 
 
 def is_excluded(rel_path: str, excludes: List[str]) -> bool:
-    norm = norm_path(rel_path)
+    # 大小写不敏感：Windows/macOS 文件系统大小写不敏感，且须与 build 侧
+    # km_build_index.iter_note_files 的 p.lower() 口径一致——否则同一知识目录里
+    # `.GIT`/`Node_Modules`/`.Recycle` 等大写黑名单目录会在对外 /search 泄露，
+    # 却在 build_index 被隐藏（两侧结果不一致）。Node 参照实现同步小写以保持 parity。
+    norm = norm_path(rel_path).lower()
     parts = norm.split("/")
     for e in excludes:
-        n = norm_path(e)
+        n = norm_path(e).lower()
         if norm == n or ("/" + n + "/") in norm or norm.startswith(n + "/") or n in parts:
             return True
     return False
+
+
+def _is_link_like(p: Path) -> bool:
+    # Node（libuv）在 Windows 上把目录符号链接与 NTFS junction/mount-point 一类的
+    # 重解析点（reparse point）都归类为 symlink，fs.readdirSync 返回的 Dirent
+    # isSymbolicLink()=True、isDirectory()=False，walk 因此完全不跟随它们。
+    # Python 的 Path.is_symlink() 对 junction 返回 False、is_dir() 返回 True，会跟随
+    # 自环 junction 直至撞 MAX_PATH 产生大量重复伪文档。为与 Node 保持 parity 并消除
+    # 环路，这里把「符号链接 或 任何 reparse point」统一视为链接、在 walk 中跳过。
+    try:
+        if p.is_symlink():
+            return True
+    except OSError:
+        return False
+    try:
+        attr = getattr(os.lstat(str(p)), "st_file_attributes", 0)
+    except OSError:
+        return False
+    FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+    return bool(attr & FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _load_sidecar_index(root: Path) -> Optional[Dict[str, Any]]:
@@ -148,6 +173,11 @@ def build_corpus(opts: Dict[str, Any]) -> Dict[str, Any]:
             p = dir_path / e.name
             rel = str(p.relative_to(root))
             if e.is_dir():
+                # link-safe：符号链接与 NTFS junction/reparse point 一律不跟随（环路防护）。
+                # Node 侧 fs.readdirSync 的 Dirent 已把这些重解析点判为 symlink、不递归；
+                # Python is_symlink() 不识别 junction，故显式用 _is_link_like 对齐两侧行为。
+                if _is_link_like(e):
+                    continue
                 if not is_excluded(rel, excludes):
                     walk(p)
                 else:
@@ -348,6 +378,9 @@ def build_corpus_cached(opts: Dict[str, Any]) -> Dict[str, Any]:
             p = dir_path / e.name
             rel = str(p.relative_to(root))
             if e.is_dir():
+                # link-safe：符号链接 / junction / reparse point 不跟随（环路防护），与 build_corpus / Node 一致。
+                if _is_link_like(e):
+                    continue
                 if not is_excluded(rel, excludes):
                     walk(p)
                 else:

@@ -46,9 +46,12 @@ function parseExcludes(value) {
 }
 
 function isExcluded(relPath, excludes) {
-  const norm = normPath(relPath);
+  // 与 Python bm25.is_excluded 同步：大小写不敏感。Windows/macOS 文件系统大小写不敏感，
+  // 且须与 build 侧 iter_note_files 的 p.lower() 口径一致——否则 `.GIT`/`Node_Modules` 等
+  // 大写黑名单目录会在对外 /search 泄露，却在 build_index 被隐藏（两侧不一致）。
+  const norm = normPath(relPath).toLowerCase();
   return excludes.some(e => {
-    const n = normPath(e);
+    const n = normPath(e).toLowerCase();
     return norm === n || norm.includes('/' + n + '/') || norm.startsWith(n + '/') || norm.split('/').includes(n);
   });
 }
@@ -110,6 +113,8 @@ function buildCorpus(opts) {
     for (const e of entries) {
       const p = path.join(dir, e.name);
       const rel = path.relative(root, p);
+      // link-safe：libuv 的 Dirent 把目录符号链接与 NTFS junction/reparse point 都判为
+      // isSymbolicLink()=true、isDirectory()=false，故符号链接目录被静默跳过（环路防护），与 Python bm25._is_link_like 一致。
       if (e.isDirectory()) { if (!isExcluded(rel, excludes)) walk(p); else skipped.push(normPath(rel)); continue; }
       if (!e.isFile() || !/\.(md|markdown)$/i.test(e.name)) continue;
       scanned.push(rel);
@@ -196,6 +201,7 @@ function buildCorpusCached(opts) {
     for (const e of entries) {
       const p = path.join(dir, e.name);
       const rel = path.relative(root, p);
+      // link-safe：同 build_corpus，符号链接 / junction / reparse point 不递归（环路防护），与 Python 一致。
       if (e.isDirectory()) { if (!isExcluded(rel, excludes)) walk(p); else skipped.push(normPath(rel)); continue; }
       if (e.isFile() && /\.(md|markdown)$/i.test(e.name)) files.push({ abs: p, rel, name: e.name });
     }
